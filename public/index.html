@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' http: https: data:; connect-src 'self' http: https:;"
+    />
+    <title>VideoDL</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="bar">
+        <span class="bar-brand">VideoDL</span>
+        <button id="settingsBtn" class="bar-btn" title="设置">⚙</button>
+      </header>
+
+      <div class="flow">
+        <!-- Input -->
+        <div class="input-zone">
+          <div class="input-shell" id="inputShell">
+            <input type="text" id="urlInput" class="url-input" placeholder="粘贴链接…" autocomplete="off" autofocus />
+            <button id="clearInputBtn" class="shell-btn hidden" title="清空">×</button>
+            <button id="pasteBtn" class="shell-btn" title="粘贴">📋</button>
+          </div>
+          <div class="input-meta">
+            <span id="inputHint">支持 B站 · 抖音 · YouTube · Instagram · TikTok · 1000+ 站点</span>
+          </div>
+        </div>
+
+        <!-- Cookies hint (conditional) -->
+        <div id="cookiesRow" class="cookies-note hidden">
+          <span>🔐 需要登录信息 —</span>
+          <label class="radio-inline"><input type="radio" name="cMode" value="none" checked />跳过</label>
+          <label class="radio-inline"><input type="radio" name="cMode" value="file" />cookies.txt</label>
+          <button id="cookiesFileBtn" class="btn-inline" disabled>选择</button>
+          <span id="cookiesFileLabel" class="file-tag"></span>
+          <button id="cookiesHelpBtn" class="btn-inline">📖</button>
+          <div id="cookiesHelp" class="help-pop hidden">
+            <b>获取 cookies.txt</b>
+            <ol>
+              <li>Chrome 装「Get cookies.txt LOCALLY」扩展</li>
+              <li>打开网站并登录</li>
+              <li>点扩展 → Export → 保存</li>
+              <li>选「cookies.txt」并选择文件</li>
+            </ol>
+            <button id="cookiesHelpClose" class="btn-inline">关闭</button>
+          </div>
+        </div>
+
+        <!-- Status -->
+        <div id="statusBox" class="status-bar hidden"></div>
+
+        <!-- Preview + Format + Download (one card) -->
+        <div id="previewCard" class="pv-card hidden">
+          <div class="pv-thumb" id="previewThumb"></div>
+          <div class="pv-body">
+            <div class="pv-platform" id="piPlatform"></div>
+            <div class="pv-title" id="piTitle"></div>
+            <div class="pv-meta" id="piMeta"></div>
+            <div id="formatBar" class="fmt-row hidden"></div>
+            <button id="downloadBtn" class="dl-btn dl-btn-wide" disabled>
+              <span>⬇ 下载视频</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Queue -->
+        <div id="queueCard" class="section hidden">
+          <div class="section-head">
+            <span>下载队列</span>
+          </div>
+          <div id="queueList" class="q-list"></div>
+        </div>
+
+        <!-- History -->
+        <div class="section">
+          <div class="section-head">
+            <span>最近下载</span>
+            <div class="head-acts">
+              <button id="openFolderBtn" class="bar-btn" title="打开文件夹">📂</button>
+              <button id="clearHistoryBtn" class="bar-btn" title="清空记录">🗑</button>
+            </div>
+          </div>
+          <div id="historyList" class="h-list">
+            <div class="empty-state">
+              <div class="empty-mark">↓</div>
+              <p>粘贴链接，下载的视频会出现在这里</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings overlay -->
+    <div id="settingsOverlay" class="overlay hidden">
+      <div class="overlay-card">
+        <div class="overlay-head"><span>设置</span><button id="settingsClose" class="bar-btn">×</button></div>
+        <div class="overlay-body">
+          <label class="ol-label">下载目录</label>
+          <div class="ol-row">
+            <input type="text" id="downloadPathInput" class="ol-input" readonly />
+            <button id="changeDirBtn" class="btn-inline">更改</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

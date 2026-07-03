@@ -1,0 +1,10 @@
+node_modules
+dist
+dist-renderer
+downloads
+package-lock.json
+*.lock
+assets/yt-dlp.exe
+assets/icon.ico
+assets/*.svg
+assets/*.png

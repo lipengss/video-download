@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --background: 0 0% 4%;
+    --foreground: 0 0% 100%;
+    --card: 218 27% 13%;
+    --card-foreground: 0 0% 100%;
+    --primary: 220 88% 58%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 218 25% 15%;
+    --secondary-foreground: 220 25% 70%;
+    --muted: 218 20% 18%;
+    --muted-foreground: 218 20% 60%;
+    --accent: 218 27% 16%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 15% 22%;
+    --input: 220 26% 22%;
+    --ring: 220 88% 58%;
+    --radius: 0.625rem;
+    --success: 160 84% 39%;
+    --warning: 38 92% 50%;
+  }
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-[#0A0A0A] text-foreground antialiased;
+    font-family:
+      "Microsoft YaHei",
+      "PingFang SC",
+      -apple-system,
+      ui-sans-serif,
+      sans-serif;
+  }
+}
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --radius: var(--radius);
+}
+.os-theme-light .os-scrollbar-handle {
+  background: hsla(220, 20%, 50%, 0.3) !important;
+  border-radius: 4px !important;
+}
+.os-theme-light .os-scrollbar-handle:hover {
+  background: hsla(220, 20%, 50%, 0.5) !important;
+}
+.os-theme-light .os-scrollbar-track {
+  background: transparent !important;
+}
+.drag-region {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+@keyframes slide-down {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -16px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+.slide-down {
+  animation: slide-down 0.25s ease-out;
+}

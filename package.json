@@ -1,0 +1,117 @@
+{
+  "name": "videodl-pro",
+  "version": "1.0.0",
+  "description": "VideoDL Pro - 全平台视频下载工具",
+  "main": "main.js",
+  "author": "VideoDL Pro",
+  "license": "SEE LICENSE IN LICENSE.txt",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k \"vite --config vite.config.ts\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev:vite": "vite --config vite.config.ts",
+    "dev:electron": "electron .",
+    "start": "electron .",
+    "build:vite": "tsc && vite build --config vite.config.ts",
+    "build": "npm run build:vite && electron-builder",
+    "build:win": "npm run build:vite && electron-builder --win",
+    "build:mac": "npm run build:vite && electron-builder --mac",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,html,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,css,html,md}\"",
+    "lint": "eslint \"src/**/*.{ts,tsx}\"",
+    "lint:fix": "eslint --fix \"src/**/*.{ts,tsx}\""
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@tailwindcss/vite": "^4.3.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "concurrently": "^10.0.3",
+    "electron": "^42.5.1",
+    "electron-builder": "^26.15.3",
+    "eslint": "^10.6.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "prettier": "^3.9.4",
+    "tailwindcss": "^4.3.2",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.62.1",
+    "vite": "^8.1.1",
+    "wait-on": "^9.0.10"
+  },
+  "build": {
+    "appId": "com.videodl.pro",
+    "productName": "VideoDL Pro",
+    "copyright": "Copyright © 2024 VideoDL Pro",
+    "electronDist": "./node_modules/electron/dist",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "engine/**/*",
+      "dist-renderer/**/*",
+      "assets/icon.*"
+    ],
+    "extraResources": [
+      {
+        "from": "assets/yt-dlp.exe",
+        "to": "yt-dlp.exe"
+      }
+    ],
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "VideoDL Pro",
+      "installerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico"
+    },
+    "mac": {
+      "icon": "assets/icon-256.png",
+      "target": [
+        "dmg"
+      ],
+      "artifactName": "${productName}-${version}.${ext}"
+    },
+    "dmg": {
+      "title": "VideoDL Pro"
+    }
+  },
+  "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.17",
+    "@radix-ui/react-progress": "^1.1.10",
+    "@radix-ui/react-scroll-area": "^1.2.12",
+    "@radix-ui/react-slot": "^1.3.0",
+    "@radix-ui/react-tabs": "^1.1.16",
+    "@radix-ui/react-tooltip": "^1.2.10",
+    "btch-downloader": "^6.0.37",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.22.0",
+    "overlayscrollbars": "^2.16.0",
+    "overlayscrollbars-react": "^0.5.6",
+    "playwright": "^1.61.1",
+    "png-to-ico": "^3.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sharp": "^0.35.2",
+    "tailwind-merge": "^3.6.0"
+  }
+}

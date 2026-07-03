@@ -1,0 +1,53 @@
+# ===== 依赖 =====
+node_modules/
+
+# ===== 构建输出 =====
+dist/
+dist-renderer/
+
+# ===== 下载目录 =====
+downloads/
+
+# ===== 日志 =====
+*.log
+logs/
+npm-debug.log*
+
+# ===== 环境变量 =====
+.env
+.env.local
+.env.*.local
+
+# ===== 操作系统 =====
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ===== IDE / 编辑器 =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+*.sublime-workspace
+*.sublime-project
+
+# ===== 工具配置 =====
+.superpowers/
+
+# ===== Electron =====
+out/
+
+# ===== Electron Builder =====
+release/
+
+# ===== TypeScript =====
+*.tsbuildinfo
+
+# ===== 临时文件 =====
+*.tmp
+*.temp
+.cache/
