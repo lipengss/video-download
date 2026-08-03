@@ -11,15 +11,47 @@ const { YtDlpEngine } = require("./engine/ytdlp");
 const { BtchEngine } = require("./engine/btch");
 const { BilibiliEngine } = require("./engine/bilibili");
 const { PlaywrightEngine } = require("./engine/playwright");
+const { Storage } = require("./main/storage");
+const { downloadHttp } = require("./main/download-http");
+const { validateCode } = require("./main/activation");
+const platforms = require("./shared/platforms.json");
+
+// 预编译平台正则
+const PLATFORM_REGEX = platforms.map((p) => ({ ...p, test: new RegExp(p.test, "i") }));
 
 // ─── 配置 ───────────────────────────────────────────────
 const USER_DATA = app.getPath("userData");
-const SETTINGS_FILE = path.join(USER_DATA, "settings.json");
-const HISTORY_FILE = path.join(USER_DATA, "history.json");
 const YTDLP_EXE = path.join(process.resourcesPath, "yt-dlp.exe");
 const YTDLP_DEV = path.join(__dirname, "assets", "yt-dlp.exe");
+const PORT_FILE = path.join(__dirname, ".vite-port");
 const isDev = !app.isPackaged;
 const ytDlpPath = isDev ? YTDLP_DEV : YTDLP_EXE;
+const store = new Storage(USER_DATA);
+
+/** 读取 Vite 实际端口（自动协商，避免端口冲突） */
+function getVitePort() {
+  try {
+    if (fs.existsSync(PORT_FILE)) {
+      const port = parseInt(fs.readFileSync(PORT_FILE, "utf8").trim(), 10);
+      if (port > 0) return port;
+    }
+  } catch {}
+  return 5173;
+}
+
+/** 检查 Vite 开发服务器是否在指定端口可用 */
+function isViteRunning(port) {
+  return new Promise((resolve) => {
+    const req = http.get(`http://localhost:${port}`, (res) => {
+      resolve(res.statusCode === 200);
+    });
+    req.on("error", () => resolve(false));
+    req.setTimeout(3000, () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+}
 
 let mainWindow = null;
 let engine = null;
@@ -28,43 +60,9 @@ let biliEngine = null;
 let pwEngine = null;
 let activeDownloads = new Map(); // track active download processes for cancellation
 
-// ─── 持久化存储 ─────────────────────────────────────────
-
-function loadJSON(file, fallback) {
-  try {
-    if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    /* ignore */
-  }
-  return fallback;
-}
-function saveJSON(file, data) {
-  const dir = path.dirname(file);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
-}
-
-function getSettings() {
-  return loadJSON(SETTINGS_FILE, { downloadPath: path.join(USER_DATA, "downloads") });
-}
-function saveSettings(s) {
-  saveJSON(SETTINGS_FILE, s);
-}
-
-function getHistory() {
-  return loadJSON(HISTORY_FILE, []);
-}
-function saveHistory(h) {
-  saveJSON(HISTORY_FILE, h);
-}
-
-function ensureDir(p) {
-  if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
-}
-
 // ─── 窗口 ────────────────────────────────────────────────
 
-function createWindow() {
+async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 600,
     height: 820,
@@ -85,7 +83,19 @@ function createWindow() {
   });
   // Dev: Vite server / Prod: built files
   if (isDev) {
-    mainWindow.loadURL("http://localhost:5173");
+    const vitePort = getVitePort();
+    console.log(`[main] Vite port file → ${vitePort}`);
+    const running = await isViteRunning(vitePort);
+    if (running) {
+      console.log(`[main] Loading http://localhost:${vitePort}`);
+      mainWindow.loadURL(`http://localhost:${vitePort}`);
+    } else {
+      console.error(`[main] Vite 未运行在端口 ${vitePort}，请先执行 npm run dev:vite`);
+      // 加载内置错误提示页面
+      mainWindow.loadURL(
+        `data:text/html,<html><body style="background:#141d2e;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center"><h2>Vite 开发服务器未启动</h2><p style="color:#7184a5">请先执行 <code style="background:#1d2a40;padding:2px 8px;border-radius:4px">npm run dev:vite</code> 然后重新启动 Electron</p></div></body></html>`,
+      );
+    }
   } else {
     mainWindow.loadFile(path.join(__dirname, "dist-renderer", "index.html"));
   }
@@ -133,11 +143,66 @@ function setupIPC() {
   ipcMain.handle("window-close", () => mainWindow?.close());
 
   // ── 设置 ──
-  ipcMain.handle("get-settings", () => getSettings());
+  ipcMain.handle("get-settings", () => store.getSettings());
   ipcMain.handle("save-settings", (e, s) => {
-    saveSettings(s);
+    store.saveSettings(s);
     return { ok: true };
   });
+  ipcMain.handle("activate", async (e, code) => {
+    const result = await validateCode(code);
+    if (result.valid) {
+      const settings = store.getSettings();
+      settings.activated = true;
+      settings.activatedAt = new Date().toISOString();
+      settings.activatedCode = result.formatted;
+      if (result.expiresAt) settings.activatedExpiresAt = result.expiresAt;
+      store.saveSettings(settings);
+      return { ok: true, expiresAt: result.expiresAt };
+    }
+    return { ok: false, error: result.error };
+  });
+
+  // 检查激活状态（启动时调用 API 实时验证）
+  ipcMain.handle("check-activated", async () => {
+    const settings = store.getSettings();
+    if (!settings.activated) return { activated: false };
+
+    // 有存储的激活码 → 调用 API 实时验证（检查是否被撤销等）
+    if (settings.activatedCode) {
+      try {
+        const result = await validateCode(settings.activatedCode);
+        if (result.valid) {
+          // API 确认有效 → 更新本地到期时间
+          if (result.expiresAt) {
+            settings.activatedExpiresAt = result.expiresAt;
+            store.saveSettings(settings);
+          }
+          return { activated: true, expiresAt: result.expiresAt || settings.activatedExpiresAt || null };
+        }
+        // API 返回无效 → 清除本地激活状态
+        settings.activated = false;
+        settings.activatedCode = "";
+        store.saveSettings(settings);
+        return { activated: false, reason: result.error || "invalid" };
+      } catch {
+        // API 不可达 → 回退到本地缓存判断
+        console.error("[check-activated] API 不可达，使用本地缓存");
+      }
+    }
+
+    // 无激活码或 API 离线 → 本地过期检测兜底
+    if (settings.activatedExpiresAt) {
+      const expiresAt = new Date(settings.activatedExpiresAt).getTime();
+      if (Date.now() > expiresAt) {
+        settings.activated = false;
+        settings.activatedCode = "";
+        store.saveSettings(settings);
+        return { activated: false, reason: "expired" };
+      }
+    }
+    return { activated: true, expiresAt: settings.activatedExpiresAt || null };
+  });
+
   ipcMain.handle("select-dir", async () => {
     const r = await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory"], title: "选择下载目录" });
     return { path: r.canceled ? null : r.filePaths[0] };
@@ -147,26 +212,32 @@ function setupIPC() {
   ipcMain.handle("get-engine-info", async () => ({
     engine: engine && engine.isAvailable() ? "yt-dlp" : "none",
     ytDlpExists: fs.existsSync(ytDlpPath),
-    downloadPath: getSettings().downloadPath,
+    downloadPath: store.getSettings().downloadPath,
   }));
+
+  /** 根据共享平台配置检测某个 URL 是否应优先用 btch 引擎 */
+  function isBtchFirst(url) {
+    const matched = PLATFORM_REGEX.find((p) => p.test.test(url));
+    return matched?.btchFirst ?? false;
+  }
 
   ipcMain.handle("parse-url", async (event, url, opts) => {
     // B站: 专用引擎
-    if (/bilibili\.com|b23\.tv/i.test(url) && biliEngine) {
+    if (PLATFORM_REGEX.find((p) => p.name === "bilibili")?.test.test(url) && biliEngine) {
       try {
         return await biliEngine.parse(url);
       } catch (biliErr) {
-        /* fall through */
+        console.error("[parse-url] bilibili fallback:", biliErr.message);
       }
     }
 
-    // Instagram / 抖音: btch 优先（不需要 cookies）
-    const btchFirst = /instagram\.com|douyin\.com|v\.douyin/i.test(url);
+    // btch 优先的平台（Instagram / 抖音 / TikTok 等不需要 cookies）
+    const btchFirst = isBtchFirst(url);
     if (btchFirst && btchEngine) {
       try {
         return await btchEngine.parse(url);
       } catch (btchErr) {
-        /* fall through */
+        console.error("[parse-url] btch-first fallback:", btchErr.message);
       }
     }
 
@@ -184,7 +255,7 @@ function setupIPC() {
             r._ytError = ytErr.message;
             return r;
           } catch (btchErr) {
-            /* fall through */
+            console.error("[parse-url] yt-dlp→btch fallback:", btchErr.message);
           }
         }
         if (pwEngine) {
@@ -204,7 +275,7 @@ function setupIPC() {
       try {
         return await btchEngine.parse(url);
       } catch (err) {
-        /* fall through */
+        console.error("[parse-url] btch fallback:", err.message);
       }
     }
     // Playwright 兜底（处理强反爬站点）
@@ -229,10 +300,16 @@ function setupIPC() {
     "start-download",
     async (
       event,
-      { url, formatId, index, cookiesBrowser, cookiesFile, isBtch, _bvid, _cid, originalUrl, downloadId },
+      { url, formatId, index, cookiesBrowser, cookiesFile, proxy, isBtch, _bvid, _cid, originalUrl, downloadId },
     ) => {
-      const settings = getSettings();
-      ensureDir(settings.downloadPath);
+      const settings = store.getSettings();
+
+      // 激活码校验（防御层）
+      if (!settings.activated) {
+        return { error: "软件未激活，请先输入激活码" };
+      }
+
+      fs.mkdirSync(settings.downloadPath, { recursive: true });
 
       const ts = Date.now();
       const fileName = `video_${ts}.mp4`;
@@ -261,6 +338,7 @@ function setupIPC() {
           await engine.download(url, formatId, filePath, (p) => send("download-progress", p), {
             cookiesBrowser,
             cookiesFile,
+            proxy,
           });
         }
         const size = fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
@@ -274,34 +352,34 @@ function setupIPC() {
   );
 
   // ── 历史 ──
-  ipcMain.handle("get-history", () => getHistory());
+  ipcMain.handle("get-history", () => store.getHistory());
   ipcMain.handle("add-history", (e, record) => {
-    const hist = getHistory();
+    const hist = store.getHistory();
     hist.unshift({
       ...record,
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       time: new Date().toISOString(),
     });
     if (hist.length > 500) hist.length = 500;
-    saveHistory(hist);
+    store.saveHistory(hist);
     return { ok: true, id: hist[0].id };
   });
   ipcMain.handle("update-history", (e, id, updates) => {
-    const hist = getHistory();
+    const hist = store.getHistory();
     const idx = hist.findIndex((r) => r.id === id);
     if (idx >= 0) {
       Object.assign(hist[idx], updates);
-      saveHistory(hist);
+      store.saveHistory(hist);
     }
     return { ok: true };
   });
   ipcMain.handle("delete-history", (e, id) => {
-    const hist = getHistory().filter((r) => r.id !== id);
-    saveHistory(hist);
+    const hist = store.getHistory().filter((r) => r.id !== id);
+    store.saveHistory(hist);
     return { ok: true };
   });
   ipcMain.handle("clear-history", () => {
-    saveHistory([]);
+    store.saveHistory([]);
     return { ok: true };
   });
 
@@ -319,7 +397,7 @@ function setupIPC() {
     return { ok: true };
   });
   ipcMain.handle("open-folder", () => {
-    shell.openPath(getSettings().downloadPath);
+    shell.openPath(store.getSettings().downloadPath);
   });
   ipcMain.handle("select-cookies-file", async () => {
     const r = await dialog.showOpenDialog(mainWindow, {
@@ -333,7 +411,7 @@ function setupIPC() {
   // 本地文件列表
   ipcMain.handle("list-local-files", () => {
     try {
-      const dir = getSettings().downloadPath;
+      const dir = store.getSettings().downloadPath;
       if (!fs.existsSync(dir)) return [];
       return fs
         .readdirSync(dir)
@@ -351,13 +429,12 @@ function setupIPC() {
 
   // 检查文件是否存在
   ipcMain.handle("file-exists", (e, fileName) => {
-    const fp = path.join(getSettings().downloadPath, fileName);
+    const fp = path.join(store.getSettings().downloadPath, fileName);
     return fs.existsSync(fp) ? { exists: true, path: fp, size: fs.statSync(fp).size } : { exists: false };
   });
 
   // ── 缩略图缓存（解决抖音等平台防盗链） ──
-  const CACHE_DIR = path.join(USER_DATA, "thumb_cache");
-  ensureDir(CACHE_DIR);
+  const CACHE_DIR = store.cacheDir;
 
   ipcMain.handle("cache-thumbnail", async (e, imageUrl) => {
     if (!imageUrl || !/^https?:\/\//i.test(imageUrl)) return { path: null };
@@ -371,19 +448,22 @@ function setupIPC() {
     const doFetch = (url) =>
       new Promise((resolve, reject) => {
         const mod = url.startsWith("https") ? https : http;
-        mod
-          .get(url, { headers: { Referer: ref } }, (res) => {
-            // 跟随重定向
-            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-              doFetch(res.headers.location).then(resolve).catch(reject);
-              return;
-            }
-            const chunks = [];
-            res.on("data", (c) => chunks.push(c));
-            res.on("end", () => resolve(Buffer.concat(chunks)));
-            res.on("error", reject);
-          })
-          .on("error", reject);
+        const req = mod.get(url, { headers: { Referer: ref } }, (res) => {
+          // 跟随重定向
+          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            doFetch(res.headers.location).then(resolve).catch(reject);
+            return;
+          }
+          const chunks = [];
+          res.on("data", (c) => chunks.push(c));
+          res.on("end", () => resolve(Buffer.concat(chunks)));
+          res.on("error", reject);
+        });
+        req.setTimeout(15000, () => {
+          req.destroy();
+          reject(new Error("缩略图下载超时"));
+        });
+        req.on("error", reject);
       });
 
     try {
@@ -396,107 +476,6 @@ function setupIPC() {
   });
 }
 
-// ─── HTTP 下载 ──────────────────────────────────────────
-
-function downloadHttp(url, destPath, onProgress, retries = 3, headers = {}) {
-  return new Promise((resolve, reject) => {
-    let file = null,
-      lastDl = 0,
-      stallTimer = null;
-    const defaultHeaders = {
-      Accept: "*/*",
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    };
-    const mergedHeaders = { ...defaultHeaders, ...headers };
-
-    const doReq = (reqUrl, n) => {
-      if (n > 5) return reject(new Error("重定向过多"));
-      if (file) {
-        try {
-          file.close();
-        } catch {}
-      }
-      if (stallTimer) clearTimeout(stallTimer);
-      file = fs.createWriteStream(destPath, { flags: n === 0 ? "w" : "w" });
-      const proto = reqUrl.startsWith("https") ? https : http;
-      const req = proto.get(reqUrl, { headers: mergedHeaders }, (res) => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          file.close();
-          file = null;
-          if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
-          return doReq(res.headers.location, n + 1);
-        }
-        if (res.statusCode !== 200) {
-          file.close();
-          return reject(new Error(`HTTP ${res.statusCode}`));
-        }
-        const total = parseInt(res.headers["content-length"] || "0", 10);
-        let dl = 0;
-        lastDl = 0;
-
-        // 超时检测：30 秒无数据则重试
-        const resetStall = () => {
-          if (stallTimer) clearTimeout(stallTimer);
-          stallTimer = setTimeout(() => {
-            if (dl === lastDl && retries > 0) {
-              file.close();
-              file = null;
-              if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
-              retries--;
-              doReq(reqUrl, n);
-            }
-          }, 30000);
-        };
-        resetStall();
-
-        res.on("data", (chunk) => {
-          dl += chunk.length;
-          lastDl = dl;
-          resetStall();
-          onProgress({
-            percent: total > 0 ? Math.round((dl / total) * 100) : 0,
-            totalSize: (total / 1048576).toFixed(1) + " MiB",
-          });
-        });
-        res.on("error", (err) => {
-          if (file) file.close();
-          if (retries > 0) {
-            retries--;
-            doReq(reqUrl, n);
-          } else reject(err);
-        });
-        res.pipe(file);
-        file.on("finish", () => {
-          if (stallTimer) clearTimeout(stallTimer);
-          file.close();
-          resolve();
-        });
-        file.on("error", (err) => {
-          if (retries > 0) {
-            retries--;
-            doReq(reqUrl, n);
-          } else reject(err);
-        });
-      });
-      req.setTimeout(60000, () => {
-        req.destroy();
-        if (retries > 0) {
-          retries--;
-          doReq(reqUrl, n);
-        } else reject(new Error("请求超时"));
-      });
-      req.on("error", (err) => {
-        if (file) file.close();
-        if (retries > 0) {
-          retries--;
-          doReq(reqUrl, n);
-        } else reject(err);
-      });
-    };
-    doReq(url, 0);
-  });
-}
-
 // ─── 启动 ────────────────────────────────────────────────
 
 app.whenReady().then(() => {
@@ -505,7 +484,7 @@ app.whenReady().then(() => {
   btchEngine = new BtchEngine();
   biliEngine = new BilibiliEngine();
   pwEngine = new PlaywrightEngine();
-  ensureDir(getSettings().downloadPath);
+  fs.mkdirSync(store.getSettings().downloadPath, { recursive: true });
   setupIPC();
   createWindow();
   app.on("activate", () => {
@@ -514,4 +493,7 @@ app.whenReady().then(() => {
 });
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
+});
+app.on("before-quit", () => {
+  if (pwEngine) pwEngine.close?.();
 });

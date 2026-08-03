@@ -1,0 +1,86 @@
+[
+  {
+    "name": "bilibili",
+    "label": "B站",
+    "short": "B站",
+    "test": "bilibili\\.com|b23\\.tv",
+    "bg": "#fb7299",
+    "icon": "Bilibili.svg",
+    "btchFn": null,
+    "btchFirst": false,
+    "cls": "text-sky-400 bg-sky-400/10",
+    "dot": "bg-sky-400"
+  },
+  {
+    "name": "douyin",
+    "label": "抖音",
+    "short": "抖音",
+    "test": "douyin\\.com|v\\.douyin",
+    "bg": "#170B1A",
+    "icon": "抖音.svg",
+    "btchFn": "douyin",
+    "btchFirst": true,
+    "cls": "text-white bg-white/10",
+    "dot": "bg-white"
+  },
+  {
+    "name": "tiktok",
+    "label": "TikTok",
+    "short": "TK",
+    "test": "tiktok\\.com",
+    "bg": "#ee1d52",
+    "icon": "抖音.svg",
+    "btchFn": "ttdl",
+    "btchFirst": true,
+    "cls": "text-rose-400 bg-rose-400/10",
+    "dot": "bg-rose-400"
+  },
+  {
+    "name": "instagram",
+    "label": "Instagram",
+    "short": "IG",
+    "test": "instagram\\.com",
+    "bg": "linear-gradient(135deg,#f09433,#e6683c,#dc2743,#cc2366,#833ab4)",
+    "icon": "instgram.svg",
+    "btchFn": "igdl",
+    "btchFirst": true,
+    "cls": "text-pink-400 bg-pink-400/10",
+    "dot": "bg-pink-400"
+  },
+  {
+    "name": "youtube",
+    "label": "YouTube",
+    "short": "YT",
+    "test": "youtube\\.com|youtu\\.be",
+    "bg": "#d31616",
+    "icon": "youtube.svg",
+    "btchFn": "youtube",
+    "btchFirst": false,
+    "cls": "text-red-400 bg-red-400/10",
+    "dot": "bg-red-400"
+  },
+  {
+    "name": "twitter",
+    "label": "Twitter / X",
+    "short": "X",
+    "test": "twitter\\.com|x\\.com",
+    "bg": "#1da1f2",
+    "icon": "youtube.svg",
+    "btchFn": "twitter",
+    "btchFirst": false,
+    "cls": "text-blue-400 bg-blue-400/10",
+    "dot": "bg-blue-400"
+  },
+  {
+    "name": "facebook",
+    "label": "Facebook",
+    "short": "FB",
+    "test": "facebook\\.com|fb\\.watch",
+    "bg": "#1877f2",
+    "icon": "youtube.svg",
+    "btchFn": "fbdown",
+    "btchFirst": false,
+    "cls": "text-blue-400 bg-blue-400/10",
+    "dot": "bg-blue-400"
+  }
+]

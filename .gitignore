@@ -47,6 +47,10 @@ release/
 # ===== TypeScript =====
 *.tsbuildinfo
 
+# ===== 开发服务器 =====
+dev-server.log
+.vite-port
+
 # ===== 临时文件 =====
 *.tmp
 *.temp

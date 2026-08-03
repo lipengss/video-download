@@ -11,10 +11,12 @@ interface SettingsPanelProps {
   defaultQuality: string;
   cookiesMap: Record<string, string>;
   useProxy: boolean;
+  proxyUrl: string;
   onDlPathChange: (path: string) => void;
   onDefaultQualityChange: (quality: string) => void;
   onCookiesChange: (cookies: Record<string, string>) => void;
   onUseProxyChange: (use: boolean) => void;
+  onProxyUrlChange: (url: string) => void;
   onSave: () => void;
   onSelectDir: () => Promise<{ path: string | null }>;
   onPickCookies: (name: string) => Promise<void>;
@@ -27,10 +29,12 @@ export function SettingsPanel({
   defaultQuality,
   cookiesMap,
   useProxy,
+  proxyUrl,
   onDlPathChange,
   onDefaultQualityChange,
   onCookiesChange,
   onUseProxyChange,
+  onProxyUrlChange,
   onSave,
   onSelectDir,
   onPickCookies,
@@ -123,22 +127,32 @@ export function SettingsPanel({
               </div>
             ))}
           </div>
-          <div className="flex items-center justify-between rounded-[12px] bg-[#172236] px-3 py-3">
-            <div className="flex items-center gap-2">
-              <Globe className="h-4 w-4 text-[#8ea0bd]" />
-              <span className="text-xs">启用代理</span>
+          <div className="space-y-2 rounded-[12px] bg-[#172236] px-3 py-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Globe className="h-4 w-4 text-[#8ea0bd]" />
+                <span className="text-xs">启用代理</span>
+              </div>
+              <button
+                onClick={() => onUseProxyChange(!useProxy)}
+                className={cn("relative h-6 w-11 rounded-full", useProxy ? "bg-[#4e73ff]" : "bg-[#2a3952]")}
+              >
+                <span
+                  className={cn(
+                    "absolute top-1 h-4 w-4 rounded-full bg-white transition",
+                    useProxy ? "left-6" : "left-1",
+                  )}
+                />
+              </button>
             </div>
-            <button
-              onClick={() => onUseProxyChange(!useProxy)}
-              className={cn("relative h-6 w-11 rounded-full", useProxy ? "bg-[#4e73ff]" : "bg-[#2a3952]")}
-            >
-              <span
-                className={cn(
-                  "absolute top-1 h-4 w-4 rounded-full bg-white transition",
-                  useProxy ? "left-6" : "left-1",
-                )}
+            {useProxy && (
+              <input
+                value={proxyUrl}
+                onChange={(e) => onProxyUrlChange(e.target.value)}
+                placeholder="http://127.0.0.1:7890"
+                className="h-9 w-full rounded-[10px] border border-white/[0.08] bg-[#1d2a40] px-3 text-xs outline-none"
               />
-            </button>
+            )}
           </div>
         </OverlayScrollbarsComponent>
         <div className="border-t border-white/[0.07] p-5">

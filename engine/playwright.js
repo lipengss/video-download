@@ -1,23 +1,60 @@
 /**
- * Playwright 浏览器引擎
- * 用于绕过严格反爬的网站（新片场等）
+ * Playwright 浏览器引擎（单例模式）
+ * 用于绕过严格反爬的网站（新片场等），复用浏览器实例避免重复启动开销
  */
 
 const { chromium } = require("playwright");
 
 class PlaywrightEngine {
-  async parse(url) {
-    let browser, context;
-    try {
-      browser = await chromium.launch({
+  constructor() {
+    this._browser = null;
+    this._initPromise = null;
+  }
+
+  /** 懒加载单例浏览器（带并发保护） */
+  async _getBrowser() {
+    if (this._browser?.isConnected()) return this._browser;
+    if (this._initPromise) return this._initPromise;
+
+    this._initPromise = chromium
+      .launch({
         headless: true,
         args: ["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-gpu"],
+      })
+      .then((browser) => {
+        this._browser = browser;
+        this._browser.on("disconnected", () => {
+          this._browser = null;
+          this._initPromise = null;
+        });
+        return browser;
+      })
+      .catch((err) => {
+        this._initPromise = null;
+        throw err;
       });
-      context = await browser.newContext({
-        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0",
-        viewport: { width: 1920, height: 1080 },
-        locale: "zh-CN",
-      });
+
+    return this._initPromise;
+  }
+
+  /** 显式关闭浏览器（应用退出时调用） */
+  async close() {
+    if (this._browser) {
+      await this._browser.close().catch(() => {});
+      this._browser = null;
+      this._initPromise = null;
+    }
+  }
+
+  async parse(url) {
+    const browser = await this._getBrowser();
+    const context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0",
+      viewport: { width: 1920, height: 1080 },
+      locale: "zh-CN",
+    });
+
+    try {
       const page = await context.newPage();
       // 隐藏自动化痕迹
       await page.addInitScript(() => {
@@ -29,7 +66,6 @@ class PlaywrightEngine {
       // 等待关键元素加载
       await page.waitForTimeout(3000);
 
-      // 等待页面加载完成，提取视频相关数据
       const videoData = await page.evaluate(() => {
         let extractedUrl = "";
         let title = document.title || "";
@@ -45,13 +81,11 @@ class PlaywrightEngine {
           const scripts = document.querySelectorAll("script");
           for (const s of scripts) {
             const text = s.textContent || "";
-            // mp4 URL
             const mp4Match = text.match(/https?:\/\/[^"'\s]+\.mp4[^"'\s]*/i);
             if (mp4Match) {
               extractedUrl = mp4Match[0];
               break;
             }
-            // m3u8 URL
             const m3u8Match = text.match(/https?:\/\/[^"'\s]+\.m3u8[^"'\s]*/i);
             if (m3u8Match) {
               extractedUrl = m3u8Match[0];
@@ -73,15 +107,10 @@ class PlaywrightEngine {
           } catch {}
         }
 
-        // 缩略图
         thumbnail = document.querySelector('meta[property="og:image"]')?.getAttribute("content") || "";
 
         return { url: extractedUrl, title, thumbnail };
       });
-
-      await context.close();
-      await browser.close();
-      browser = null;
 
       if (!videoData.url) throw new Error("未在页面中找到视频地址");
 
@@ -102,12 +131,12 @@ class PlaywrightEngine {
             quality: "",
             formats: [],
             bestFormatId: null,
-            isBtch: true, // 用 HTTP 下载
+            isBtch: true,
           },
         ],
       };
     } finally {
-      if (browser) await browser.close().catch(() => {});
+      await context.close().catch(() => {});
     }
   }
 }

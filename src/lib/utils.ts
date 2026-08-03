@@ -1,6 +1,12 @@
 ﻿import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { PLATFORMS as UI_PLATFORMS } from "./constants";
+import rawPlatforms from "../../shared/platforms.json";
+
+// 预编译正则表达式
+const PLATFORMS = (rawPlatforms as typeof rawPlatforms).map((p) => ({
+  ...p,
+  test: new RegExp(p.test, "i"),
+}));
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -8,8 +14,9 @@ export function cn(...inputs: ClassValue[]) {
 
 export function meta(url = ""): { name: string; label: string; short: string; bg: string; icon: string } {
   const p = detectPlatform(url);
+  const found = PLATFORMS.find((x) => x.name === p.name);
   return (
-    UI_PLATFORMS.find((x) => x.name === p.name) || {
+    found || {
       name: p.name,
       label: p.label,
       short: p.label,
@@ -42,32 +49,6 @@ export function cleanUrl(u: string): string {
 export function esc(s: string): string {
   return (s || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
-
-export const PLATFORMS = [
-  {
-    name: "bilibili",
-    label: "B站",
-    cls: "text-sky-400 bg-sky-400/10",
-    dot: "bg-sky-400",
-    test: /bilibili\.com|b23\.tv/i,
-  },
-  { name: "douyin", label: "抖音", cls: "text-white bg-white/10", dot: "bg-white", test: /douyin\.com|v\.douyin/i },
-  {
-    name: "instagram",
-    label: "Instagram",
-    cls: "text-pink-400 bg-pink-400/10",
-    dot: "bg-pink-400",
-    test: /instagram\.com/i,
-  },
-  {
-    name: "youtube",
-    label: "YouTube",
-    cls: "text-red-400 bg-red-400/10",
-    dot: "bg-red-400",
-    test: /youtube\.com|youtu\.be/i,
-  },
-  { name: "tiktok", label: "TikTok", cls: "text-rose-400 bg-rose-400/10", dot: "bg-rose-400", test: /tiktok\.com/i },
-];
 
 export function detectPlatform(url: string) {
   return PLATFORMS.find((p) => p.test.test(url)) || { name: "other", label: "未知", cls: "", dot: "bg-zinc-600" };

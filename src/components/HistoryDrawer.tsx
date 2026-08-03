@@ -46,7 +46,7 @@ function HistoryItem({
         </p>
         <p className="mt-0.5 truncate text-[11px] text-[#5f7190]">
           {record.time ? new Date(record.time).toLocaleString("zh-CN") : "未知时间"} ·{" "}
-          {record.resolution || fmtSize(record.size)}
+          {record.resolution || fmtSize(record.size || 0)}
         </p>
       </div>
       <span

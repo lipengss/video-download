@@ -7,9 +7,9 @@
   "license": "SEE LICENSE IN LICENSE.txt",
   "private": true,
   "scripts": {
-    "dev": "concurrently -k \"vite --config vite.config.ts\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev": "concurrently -k \"vite --config vite.config.ts\" \"wait-on .vite-port && electron .\"",
     "dev:vite": "vite --config vite.config.ts",
-    "dev:electron": "electron .",
+    "dev:electron": "wait-on .vite-port && electron .",
     "start": "electron .",
     "build:vite": "tsc && vite build --config vite.config.ts",
     "build": "npm run build:vite && electron-builder",
@@ -52,6 +52,8 @@
     "files": [
       "main.js",
       "preload.js",
+      "main/**/*",
+      "shared/**/*",
       "engine/**/*",
       "dist-renderer/**/*",
       "assets/icon.*"

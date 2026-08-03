@@ -29,6 +29,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener("download-error", h);
   },
 
+  // Activation
+  activate: (code) => ipcRenderer.invoke("activate", code),
+  checkActivated: () => ipcRenderer.invoke("check-activated"),
+
   // Settings
   getSettings: () => ipcRenderer.invoke("get-settings"),
   saveSettings: (s) => ipcRenderer.invoke("save-settings", s),

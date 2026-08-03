@@ -31,6 +31,7 @@ class YtDlpEngine {
     const args = ["--dump-json", "--no-playlist", "--js-runtimes", "node"];
     if (opts.cookiesBrowser) args.push("--cookies-from-browser", opts.cookiesBrowser);
     if (opts.cookiesFile) args.push("--cookies", opts.cookiesFile);
+    if (opts.proxy) args.push("--proxy", opts.proxy);
     args.push(url);
 
     return new Promise((resolve, reject) => {
@@ -52,7 +53,7 @@ class YtDlpEngine {
           const info = JSON.parse(stdout);
           // 从格式列表中提取所有可用的视频格式
           const formats = (info.formats || [])
-            .filter((f) => f.vcodec !== "none")
+            .filter((f) => f.vcodec !== "none" || f.acodec !== "none")
             .map((f) => ({
               id: f.format_id,
               resolution: f.width && f.height ? `${f.width}×${f.height}` : f.format_note || "未知",
@@ -131,6 +132,11 @@ class YtDlpEngine {
       }
       if (opts.cookiesBrowser) args.push("--cookies-from-browser", opts.cookiesBrowser);
       if (opts.cookiesFile) args.push("--cookies", opts.cookiesFile);
+      if (opts.proxy) args.push("--proxy", opts.proxy);
+      if (opts.writeSubs) {
+        args.push("--write-subs", "--write-auto-subs", "--sub-lang", opts.subLang || "zh-Hans,en");
+        args.push("--embed-subs");
+      }
       args.push(url);
 
       const yt = spawn(this.binaryPath, args, { stdio: ["ignore", "pipe", "pipe"], timeout: 600000 });

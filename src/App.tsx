@@ -8,11 +8,12 @@ import { MediaList } from "./components/MediaList";
 import { Sidebar } from "./components/Sidebar";
 import { Toast } from "./components/Toast";
 import { VideoPreviewModal } from "./components/VideoPreviewModal";
+import { ActivationDialog } from "./components/ActivationDialog";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { HistoryDrawer } from "./components/HistoryDrawer";
 import { useIPC } from "./hooks/useIPC";
 import { cleanUrl, cn, detectPlatform, fmtSize } from "./lib/utils";
-import type { Media, HItem, QItem } from "./lib/types";
+import type { AppSettings, DownloadComplete, DownloadError, DownloadProgress, HItem, Media, QItem, VideoFormat } from "./lib/types";
 
 export function App() {
   const ipc = useIPC();
@@ -34,8 +35,13 @@ export function App() {
   const [hSearch, setHSearch] = useState("");
   const [defaultQuality, setDefaultQuality] = useState("1080P 高清");
   const [useProxy, setUseProxy] = useState(false);
+  const [proxyUrl, setProxyUrl] = useState("");
   const [previewVideo, setPreviewVideo] = useState<{ path: string; name: string } | null>(null);
   const [tab, setTab] = useState<"queue" | "history">("queue");
+  const [activated, setActivated] = useState(false);
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  const [showActivation, setShowActivation] = useState(false);
+  const pendingDownloadRef = useRef<(() => void) | null>(null);
   const nextRef = useRef<() => void>(() => {});
   const downloadingRef = useRef(false); // 避免闭包陈旧值导致同时下载多个
   const queuedKeys = useMemo(() => {
@@ -57,18 +63,29 @@ export function App() {
   };
 
   useEffect(() => {
-    ipc.getSettings().then((s: any) => {
+    ipc.getSettings().then((s: AppSettings) => {
       setDlPath(s.downloadPath || "");
       if (s.defaultQuality) setDefaultQuality(s.defaultQuality);
       if (s.cookies) setCookiesMap(s.cookies);
       if (typeof s.useProxy === "boolean") setUseProxy(s.useProxy);
+      if (s.proxyUrl) setProxyUrl(s.proxyUrl);
+      if (s.activated) setActivated(true);
+      if (s.activatedExpiresAt) setExpiresAt(s.activatedExpiresAt);
+    });
+    // 启动时校验激活状态（含过期检测），未激活则自动弹出激活窗口
+    ipc.checkActivated().then((r: { activated: boolean; expiresAt?: string | null }) => {
+      setActivated(r.activated);
+      if (r.expiresAt) setExpiresAt(r.expiresAt);
+      if (!r.activated) setShowActivation(true);
     });
     refreshAll();
     const api = (window as any).electronAPI;
-    api?.onDownloadProgress?.((d: any) =>
+    if (!api) return;
+
+    const unsubProgress = api.onDownloadProgress?.((d: DownloadProgress) =>
       setQueue((q) => q.map((it) => (it.status === "downloading" ? { ...it, pct: Math.round(d.percent || 0) } : it))),
     );
-    api?.onDownloadComplete?.((d: any) => {
+    const unsubComplete = api.onDownloadComplete?.((d: DownloadComplete) => {
       setQueue((q) =>
         q.map((it) => (it.status === "downloading" ? { ...it, status: "done", pct: 100, filePath: d?.filePath } : it)),
       );
@@ -76,8 +93,8 @@ export function App() {
       downloadingRef.current = false;
       // 用 d.originalUrl（= m._parseUrl）匹配更新历史记录
       if (d?.originalUrl && d?.filePath) {
-        ipc.getHistory().then(async (hist: any[]) => {
-          const record = hist.find((r: any) => cleanUrl(r.url || "") === cleanUrl(d.originalUrl));
+        ipc.getHistory().then(async (hist: HItem[]) => {
+          const record = hist.find((r: HItem) => cleanUrl(r.url || "") === cleanUrl(d.originalUrl || ""));
           if (record) {
             await ipc.updateHistory(record.id, { status: "downloaded", filePath: d.filePath, size: d.size });
             refreshAll();
@@ -93,7 +110,7 @@ export function App() {
       }, 3000);
       window.setTimeout(() => nextRef.current(), 500);
     });
-    api?.onDownloadError?.((d: any) => {
+    const unsubError = api.onDownloadError?.((d: DownloadError) => {
       const errMsg = d?.error || "下载失败";
       setQueue((q) => q.map((it) => (it.status === "downloading" ? { ...it, status: "failed", error: errMsg } : it)));
       setDownloading(false);
@@ -103,6 +120,12 @@ export function App() {
       showToast(errMsg, "error");
       window.setTimeout(() => nextRef.current(), 500);
     });
+
+    return () => {
+      unsubProgress?.();
+      unsubComplete?.();
+      unsubError?.();
+    };
   }, []);
 
   const merged = useMemo(() => {
@@ -153,6 +176,7 @@ export function App() {
       try {
         const opts: any = {};
         if (cookiesMap[pf.name]) opts.cookiesFile = cookiesMap[pf.name];
+        if (useProxy && proxyUrl) opts.proxy = proxyUrl;
         const r = await ipc.parseUrl(clean, opts);
         if (r.error) {
           failedUrls.push(pf.label);
@@ -217,7 +241,7 @@ export function App() {
       const fmts = m.formats || [];
       let chosen = m.bestFormatId || fmts[0]?.id || null;
       for (const kw of qmap[defaultQuality] || []) {
-        const found = fmts.find((f: any) => f.resolution?.includes(kw) || f.quality?.includes(kw));
+        const found = fmts.find((f: VideoFormat) => f.resolution?.includes(kw) || f.quality?.includes(kw));
         if (found) {
           chosen = found.id;
           break;
@@ -262,8 +286,8 @@ export function App() {
     // 启动下载前：更新历史记录状态
     const m = taskRef.media;
     const parseUrl = m._parseUrl || cleanUrl(m.url || "");
-    ipc.getHistory().then((hist: any[]) => {
-      const record = hist.find((r: any) => cleanUrl(r.url || "") === parseUrl);
+    ipc.getHistory().then((hist: HItem[]) => {
+      const record = hist.find((r: HItem) => cleanUrl(r.url || "") === parseUrl);
       if (record) ipc.updateHistory(record.id, { status: "downloading" });
     });
 
@@ -277,6 +301,7 @@ export function App() {
     const opts: any = {};
     const pf = detectPlatform(m.url || url);
     if (cookiesMap[pf.name]) opts.cookiesFile = cookiesMap[pf.name];
+    if (useProxy && proxyUrl) opts.proxy = proxyUrl;
     ipc.startDownload({
       url: dl,
       formatId: fmt || m.bestFormatId,
@@ -291,6 +316,11 @@ export function App() {
   nextRef.current = processNext;
 
   const addToQueue = (m: Media, fmt: string | null) => {
+    if (!activated) {
+      pendingDownloadRef.current = () => addToQueue(m, fmt);
+      setShowActivation(true);
+      return;
+    }
     setQueue((q) => [
       ...q,
       {
@@ -334,9 +364,22 @@ export function App() {
   };
 
   const saveSettings = () => {
-    ipc.saveSettings({ downloadPath: dlPath, defaultQuality, useProxy, cookies: cookiesMap });
+    ipc.saveSettings({ downloadPath: dlPath, defaultQuality, useProxy, proxyUrl, cookies: cookiesMap });
     setShowSettings(false);
     showToast("设置已保存", "success");
+  };
+
+  const handleActivated = (expiresAtStr?: string) => {
+    setActivated(true);
+    setShowActivation(false);
+    if (expiresAtStr) setExpiresAt(expiresAtStr);
+    showToast("激活成功，已解锁下载功能", "success");
+    // 重试之前挂起的下载操作
+    if (pendingDownloadRef.current) {
+      const retry = pendingDownloadRef.current;
+      pendingDownloadRef.current = null;
+      window.setTimeout(() => retry(), 300);
+    }
   };
 
   const pickCookies = async (name: string) => {
@@ -344,14 +387,19 @@ export function App() {
     if (!r.path) return;
     const next = { ...cookiesMap, [name]: r.path };
     setCookiesMap(next);
-    await ipc.saveSettings({ downloadPath: dlPath, defaultQuality, useProxy, cookies: next });
+    await ipc.saveSettings({ downloadPath: dlPath, defaultQuality, useProxy, proxyUrl, cookies: next });
     showToast(`已导入 ${name} cookies`, "success");
   };
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#0b0f17] text-white">
       <main className="flex min-w-0 flex-1 flex-col bg-[#121a29]">
-        <AppHeader onOpenHistory={() => setShowHistory(true)} onOpenSettings={() => setShowSettings(true)} />
+        <AppHeader
+          onOpenHistory={() => setShowHistory(true)}
+          onOpenSettings={() => setShowSettings(true)}
+          activated={activated}
+          expiresAt={expiresAt}
+        />
         <div className="flex min-h-0 flex-1 gap-5 p-5">
           <section className="flex min-w-0 flex-1 flex-col gap-4">
             <PlatformButtons />
@@ -384,6 +432,28 @@ export function App() {
               onFormatChange={(mediaKey, formatId) => setFormatMap((prev) => ({ ...prev, [mediaKey]: formatId }))}
               onAddToQueue={addToQueue}
               onAddAllToQueue={() => {
+                if (!activated) {
+                  pendingDownloadRef.current = () => {
+                    const toAdd = parsedList.filter((m) => !queuedKeys.has(m.url || m.fileName));
+                    if (!toAdd.length) return;
+                    setQueue((q) => [
+                      ...q,
+                      ...toAdd.map((m, i) => ({
+                        id: Date.now() + i,
+                        media: m,
+                        format: formatMap[m.url || m.fileName] || m.bestFormatId,
+                        status: "queued" as const,
+                        pct: 0,
+                        isBtch: m.isBtch,
+                        _bvid: m._bvid,
+                        _cid: m._cid,
+                      })),
+                    ]);
+                    if (!downloadingRef.current) window.setTimeout(() => nextRef.current(), 100);
+                  };
+                  setShowActivation(true);
+                  return;
+                }
                 const toAdd = parsedList.filter((m) => !queuedKeys.has(m.url || m.fileName));
                 if (!toAdd.length) return;
                 setQueue((q) => [
@@ -434,13 +504,20 @@ export function App() {
         defaultQuality={defaultQuality}
         cookiesMap={cookiesMap}
         useProxy={useProxy}
+        proxyUrl={proxyUrl}
         onDlPathChange={setDlPath}
         onDefaultQualityChange={setDefaultQuality}
         onCookiesChange={setCookiesMap}
         onUseProxyChange={setUseProxy}
+        onProxyUrlChange={setProxyUrl}
         onSave={saveSettings}
         onSelectDir={async () => ipc.selectDir()}
         onPickCookies={pickCookies}
+      />
+      <ActivationDialog
+        open={showActivation}
+        onOpenChange={setShowActivation}
+        onActivated={handleActivated}
       />
       <HistoryDrawer
         open={showHistory}

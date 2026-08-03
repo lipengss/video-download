@@ -76,7 +76,7 @@ function HistoryTab({
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs font-medium text-white">{r.title || r.name || r.url || "未知视频"}</p>
                   <p className="mt-0.5 truncate text-[11px] text-[#5f7190]">
-                    {r.time ? new Date(r.time).toLocaleString("zh-CN") : "未知时间"} · {r.resolution || fmtSize(r.size)}
+                    {r.time ? new Date(r.time).toLocaleString("zh-CN") : "未知时间"} · {r.resolution || fmtSize(r.size || 0)}
                   </p>
                 </div>
                 <span
