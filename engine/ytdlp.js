@@ -32,6 +32,10 @@ class YtDlpEngine {
     if (opts.cookiesBrowser) args.push("--cookies-from-browser", opts.cookiesBrowser);
     if (opts.cookiesFile) args.push("--cookies", opts.cookiesFile);
     if (opts.proxy) args.push("--proxy", opts.proxy);
+    const extractorArgs = ["player_client=web_embedded"];
+    const poToken = this._normalizePoToken(opts.poToken);
+    if (poToken) extractorArgs.push(`po_token=${poToken}`);
+    args.push("--extractor-args", `youtube:${extractorArgs.join(";")}`);
     args.push(url);
 
     return new Promise((resolve, reject) => {
@@ -51,9 +55,9 @@ class YtDlpEngine {
         }
         try {
           const info = JSON.parse(stdout);
-          // 从格式列表中提取所有可用的视频格式
+          // 从格式列表中提取所有可用的视频格式（音频轨不应混入画质列表）
           const formats = (info.formats || [])
-            .filter((f) => f.vcodec !== "none" || f.acodec !== "none")
+            .filter((f) => f.vcodec !== "none")
             .map((f) => ({
               id: f.format_id,
               resolution: f.width && f.height ? `${f.width}×${f.height}` : f.format_note || "未知",
@@ -124,8 +128,14 @@ class YtDlpEngine {
   download(url, formatId, filePath, onProgress, opts = {}) {
     return new Promise((resolve, reject) => {
       const args = ["-o", filePath, "--no-playlist", "--progress", "--newline", "--no-mtime", "--js-runtimes", "node"];
-      if (formatId) {
-        args.push("-f", formatId);
+      if (opts.ffmpegPath) args.push("--ffmpeg-location", opts.ffmpegPath);
+      if (opts.extractAudio) {
+        // 提取音频为 MP3（-x 自动选最佳音频轨，忽略 formatId）
+        args.push("-x", "--audio-format", "mp3");
+      } else if (formatId) {
+        // 合并所选画质视频 + 最佳音频（YouTube 高清是分离的 DASH 流，单独 -f 会没声音）
+        // 优先 m4a 音频，保证与 mp4 视频合并后仍是 .mp4（webm 音频会迫使 ffmpeg 转成 .mkv）
+        args.push("-f", `${formatId}+bestaudio[ext=m4a]/bestaudio/${formatId}/best`);
       } else {
         // 默认选最高画质视频+最佳音频合并
         args.push("-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best");
@@ -133,9 +143,13 @@ class YtDlpEngine {
       if (opts.cookiesBrowser) args.push("--cookies-from-browser", opts.cookiesBrowser);
       if (opts.cookiesFile) args.push("--cookies", opts.cookiesFile);
       if (opts.proxy) args.push("--proxy", opts.proxy);
+      const extractorArgs = ["player_client=web_embedded"];
+      const poToken = this._normalizePoToken(opts.poToken);
+      if (poToken) extractorArgs.push(`po_token=${poToken}`);
+      args.push("--extractor-args", `youtube:${extractorArgs.join(";")}`);
       if (opts.writeSubs) {
+        // 下载独立字幕文件（不嵌入视频）
         args.push("--write-subs", "--write-auto-subs", "--sub-lang", opts.subLang || "zh-Hans,en");
-        args.push("--embed-subs");
       }
       args.push(url);
 
@@ -170,7 +184,17 @@ class YtDlpEngine {
       yt.on("close", (code) => {
         this._activeProcess = null;
         if (code === 0) resolve();
-        else reject(new Error(stderr.split("\n").slice(-3).join(" ") || `退出码 ${code}`));
+        else {
+          let msg = stderr.split("\n").slice(-3).join(" ") || `退出码 ${code}`;
+          // YouTube 高清下载 403 = 缺少 PO Token（Proof of Origin），给出明确指引
+          if (/403|Forbidden/i.test(msg)) {
+            msg +=
+              "\n\n💡 YouTube 高清下载需 PO Token：\n" +
+              "  1. 运行 bgutil-ytdlp-pot-provider（推荐，自动获取，无需手动填写）\n" +
+              "  2. 或在「设置 → PO Token」粘贴 token（格式 web.gvs+…）";
+          }
+          reject(new Error(msg));
+        }
       });
 
       yt.on("error", reject);
@@ -178,6 +202,18 @@ class YtDlpEngine {
   }
 
   // ─── 工具方法 ─────────────────────────────────────
+
+  /**
+   * 规范化 PO Token：用户可能粘贴完整 "web_embedded.gvs+XXX"，也可能只粘贴 token 本体。
+   * 完整格式为 <client>.<type>+<token>，否则默认补 "web_embedded.gvs+" 前缀
+   * （引擎强制 web_embedded 客户端，因为它提供直接 DASH 流且用 GVS PO Token）。
+   */
+  _normalizePoToken(t) {
+    if (!t) return "";
+    t = String(t).trim();
+    if (/^[a-zA-Z_]+\.[a-zA-Z_+]+[+:]/.test(t)) return t;
+    return `web_embedded.gvs+${t}`;
+  }
 
   _fileName(info) {
     const ext = info.ext || "mp4";
@@ -213,12 +249,14 @@ class YtDlpEngine {
 
   _qualityLabel(w, h) {
     if (!w || !h) return "";
-    const longSide = Math.max(w, h);
-    if (longSide >= 1920) return "1080p+";
-    if (longSide >= 1080) return "1080p";
-    if (longSide >= 720) return "720p";
-    if (longSide >= 480) return "480p";
-    return `${longSide}p`;
+    // 短边才是清晰度等级（1920×1080 → 1080p，竖屏 1080×1920 也是 1080p）
+    const p = Math.min(w, h);
+    if (p >= 2160) return "2160p";
+    if (p >= 1440) return "1440p";
+    if (p >= 1080) return "1080p";
+    if (p >= 720) return "720p";
+    if (p >= 480) return "480p";
+    return `${p}p`;
   }
 }
 

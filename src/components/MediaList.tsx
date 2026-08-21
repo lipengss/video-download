@@ -15,6 +15,7 @@ interface MediaListProps {
   onSelectMedia: (media: Media) => void;
   onFormatChange: (mediaKey: string, formatId: string) => void;
   onAddToQueue: (media: Media, format: string | null) => void;
+  onAddAudioToQueue: (media: Media, format: string | null) => void;
   onAddAllToQueue: () => void;
 }
 
@@ -27,6 +28,7 @@ export function MediaList({
   onSelectMedia,
   onFormatChange,
   onAddToQueue,
+  onAddAudioToQueue,
   onAddAllToQueue,
 }: MediaListProps) {
   if (parsedList.length === 0) {
@@ -76,6 +78,7 @@ export function MediaList({
               onSelect={onSelectMedia}
               onFormatChange={onFormatChange}
               onAddToQueue={onAddToQueue}
+              onAddAudioToQueue={onAddAudioToQueue}
             />
           ))}
         </div>

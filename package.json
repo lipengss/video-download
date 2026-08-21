@@ -62,6 +62,14 @@
       {
         "from": "assets/yt-dlp.exe",
         "to": "yt-dlp.exe"
+      },
+      {
+        "from": "assets/ffmpeg.exe",
+        "to": "ffmpeg.exe"
+      },
+      {
+        "from": "assets/yt-dlp-plugins",
+        "to": "yt-dlp-plugins"
       }
     ],
     "win": {

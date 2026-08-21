@@ -94,6 +94,8 @@ export interface QItem {
   isBtch?: boolean;
   _bvid?: string;
   _cid?: number;
+  /** true = 下载时提取音频为 MP3 */
+  extractAudio?: boolean;
 }
 
 /** 下载进度事件 */
@@ -149,4 +151,10 @@ export interface AppSettings {
   activatedAt?: string;
   activatedCode?: string;
   activatedExpiresAt?: string;
+  /** true = 同时下载独立字幕文件 */
+  writeSubs?: boolean;
+  /** 字幕语言，默认 "zh-Hans,en" */
+  subLang?: string;
+  /** YouTube PO Token（Proof of Origin），高清下载必需，格式 web.gvs+… */
+  poToken?: string;
 }

@@ -1,4 +1,4 @@
-import { CheckCircle2, Download, Play } from "lucide-react";
+import { CheckCircle2, Download, Music, Play } from "lucide-react";
 import { cn, duration, meta } from "../lib/utils";
 import { Button } from "./ui/button";
 import type { Media } from "../lib/types";
@@ -11,6 +11,7 @@ interface MediaCardProps {
   onSelect: (media: Media) => void;
   onFormatChange: (mediaKey: string, formatId: string) => void;
   onAddToQueue: (media: Media, format: string | null) => void;
+  onAddAudioToQueue: (media: Media, format: string | null) => void;
 }
 
 export function MediaCard({
@@ -21,6 +22,7 @@ export function MediaCard({
   onSelect,
   onFormatChange,
   onAddToQueue,
+  onAddAudioToQueue,
 }: MediaCardProps) {
   const p = meta(media.url || "");
   const mKey = media.url || media.fileName;
@@ -92,17 +94,32 @@ export function MediaCard({
               已加入队列
             </Button>
           ) : (
-            <Button
-              size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                onAddToQueue(media, selectedFormat);
-              }}
-              className="h-8 rounded-[9px] bg-[#4e73ff] px-3 text-xs"
-            >
-              <Download className="h-3.5 w-3.5" />
-              加入队列
-            </Button>
+            <div className="flex shrink-0 items-center gap-2">
+              {!media._bvid && (
+                <Button
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAddAudioToQueue(media, selectedFormat);
+                  }}
+                  className="h-8 rounded-[9px] bg-orange-500/18 px-3 text-xs text-orange-300 hover:bg-orange-500/28"
+                >
+                  <Music className="h-3.5 w-3.5" />
+                  提取音频
+                </Button>
+              )}
+              <Button
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAddToQueue(media, selectedFormat);
+                }}
+                className="h-8 rounded-[9px] bg-[#4e73ff] px-3 text-xs"
+              >
+                <Download className="h-3.5 w-3.5" />
+                下载
+              </Button>
+            </div>
           )}
         </div>
       </div>

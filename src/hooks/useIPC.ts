@@ -62,6 +62,18 @@ export function useIPC() {
       }>,
     cacheThumbnail: (url: string) =>
       (api?.cacheThumbnail?.(url) ?? Promise.resolve({ path: null })) as Promise<{ path: string | null }>,
+    getPotStatus: () =>
+      (api?.getPotStatus?.() ?? Promise.resolve({ running: false, version: null })) as Promise<{
+        running: boolean;
+        version?: string | null;
+      }>,
+    startPotServer: () =>
+      (api?.startPotServer?.() ?? Promise.resolve({ running: false })) as Promise<{
+        running: boolean;
+        started?: boolean;
+        version?: string | null;
+        error?: string;
+      }>,
   };
 }
 

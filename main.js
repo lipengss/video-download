@@ -7,6 +7,8 @@ const path = require("path");
 const fs = require("fs");
 const https = require("https");
 const http = require("http");
+const { execFile, spawn } = require("child_process");
+const os = require("os");
 const { YtDlpEngine } = require("./engine/ytdlp");
 const { BtchEngine } = require("./engine/btch");
 const { BilibiliEngine } = require("./engine/bilibili");
@@ -23,9 +25,13 @@ const PLATFORM_REGEX = platforms.map((p) => ({ ...p, test: new RegExp(p.test, "i
 const USER_DATA = app.getPath("userData");
 const YTDLP_EXE = path.join(process.resourcesPath, "yt-dlp.exe");
 const YTDLP_DEV = path.join(__dirname, "assets", "yt-dlp.exe");
+const FFMPEG_EXE = path.join(process.resourcesPath, "ffmpeg.exe");
+const FFMPEG_DEV = path.join(__dirname, "assets", "ffmpeg.exe");
 const PORT_FILE = path.join(__dirname, ".vite-port");
 const isDev = !app.isPackaged;
 const ytDlpPath = isDev ? YTDLP_DEV : YTDLP_EXE;
+// ffmpeg 存在才传入（否则 yt-dlp 会尝试从系统 PATH 查找）
+const ffmpegPath = fs.existsSync(isDev ? FFMPEG_DEV : FFMPEG_EXE) ? (isDev ? FFMPEG_DEV : FFMPEG_EXE) : null;
 const store = new Storage(USER_DATA);
 
 /** 读取 Vite 实际端口（自动协商，避免端口冲突） */
@@ -59,6 +65,72 @@ let btchEngine = null;
 let biliEngine = null;
 let pwEngine = null;
 let activeDownloads = new Map(); // track active download processes for cancellation
+
+// ─── PO Token 服务（bgutil-ytdlp-pot-provider）────────────────
+// YouTube 高清下载需 PO Token；bgutil 服务在本地 4416 端口生成 token，yt-dlp 插件自动调用。
+const POT_SERVER_DIR = path.join(os.homedir(), "bgutil-ytdlp-pot-provider", "server");
+const POT_SERVER_ENTRY = path.join(POT_SERVER_DIR, "build", "main.js");
+const POT_SERVER_PORT = 4416;
+const POT_SERVER_URL = `http://127.0.0.1:${POT_SERVER_PORT}`;
+let potServerProcess = null;
+
+function checkPotServer() {
+  return new Promise((resolve) => {
+    const req = http.get(`${POT_SERVER_URL}/ping`, (res) => {
+      let data = "";
+      res.on("data", (c) => (data += c));
+      res.on("end", () => {
+        try {
+          const j = JSON.parse(data);
+          resolve({ running: true, version: j.version || null });
+        } catch {
+          resolve({ running: true, version: null });
+        }
+      });
+    });
+    req.on("error", () => resolve({ running: false, version: null }));
+    req.setTimeout(2000, () => {
+      req.destroy();
+      resolve({ running: false, version: null });
+    });
+  });
+}
+
+async function startPotServer() {
+  const st = await checkPotServer();
+  if (st.running) return { ...st, started: false };
+  if (!fs.existsSync(POT_SERVER_ENTRY)) {
+    return { running: false, started: false, error: "未找到 PO Token 服务，请先安装 bgutil-ytdlp-pot-provider" };
+  }
+  try {
+    potServerProcess = spawn("node", [POT_SERVER_ENTRY, "--port", String(POT_SERVER_PORT)], {
+      cwd: POT_SERVER_DIR,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    potServerProcess.on("error", (e) => console.error("[pot] 启动 PO Token 服务失败:", e.message));
+    // 轮询等待服务就绪（最多 ~6s）
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 300));
+      const s = await checkPotServer();
+      if (s.running) return { running: true, started: true, version: s.version };
+    }
+    return { running: false, started: true, error: "PO Token 服务已启动但未就绪" };
+  } catch (e) {
+    return { running: false, started: false, error: e.message };
+  }
+}
+
+/** 用 ffmpeg 提取音频轨为 MP3（供 btch/B站 等直链下载后转码） */
+function extractAudioToMp3(inputPath, outputPath, ffmpegBin) {
+  return new Promise((resolve, reject) => {
+    const args = ["-y", "-i", inputPath, "-vn", "-acodec", "libmp3lame", "-q:a", "2", outputPath];
+    execFile(ffmpegBin, args, { windowsHide: true }, (err) => {
+      if (err) reject(new Error("音频提取失败：" + (err.message || "ffmpeg 错误")));
+      else resolve();
+    });
+  });
+}
 
 // ─── 窗口 ────────────────────────────────────────────────
 
@@ -215,6 +287,10 @@ function setupIPC() {
     downloadPath: store.getSettings().downloadPath,
   }));
 
+  // PO Token 服务状态 / 启动（YouTube 高清下载必需）
+  ipcMain.handle("get-pot-status", () => checkPotServer());
+  ipcMain.handle("start-pot-server", () => startPotServer());
+
   /** 根据共享平台配置检测某个 URL 是否应优先用 btch 引擎 */
   function isBtchFirst(url) {
     const matched = PLATFORM_REGEX.find((p) => p.test.test(url));
@@ -246,6 +322,8 @@ function setupIPC() {
       try {
         return await engine.parse(url, opts || {});
       } catch (ytErr) {
+        // 关键诊断日志：yt-dlp 失败原因（常见：未开代理/网络不通/bot检测/yt-dlp 缺失）
+        console.error("[parse-url] yt-dlp 解析失败 →", ytErr.message);
         if (btchFirst) return { error: `解析失败: ${ytErr.message}\n\n💡 试试勾选「cookies.txt 文件」并导入登录信息` };
         // YouTube/其他: yt-dlp 失败 → btch 后备
         if (btchEngine) {
@@ -300,7 +378,7 @@ function setupIPC() {
     "start-download",
     async (
       event,
-      { url, formatId, index, cookiesBrowser, cookiesFile, proxy, isBtch, _bvid, _cid, originalUrl, downloadId },
+      { url, formatId, index, cookiesBrowser, cookiesFile, proxy, isBtch, _bvid, _cid, originalUrl, downloadId, writeSubs, subLang, extractAudio, poToken },
     ) => {
       const settings = store.getSettings();
 
@@ -312,11 +390,12 @@ function setupIPC() {
       fs.mkdirSync(settings.downloadPath, { recursive: true });
 
       const ts = Date.now();
-      const fileName = `video_${ts}.mp4`;
+      const ext = extractAudio ? ".mp3" : ".mp4";
+      const fileName = `video_${ts}${ext}`;
       let filePath = path.join(settings.downloadPath, fileName);
       let c = 1;
       while (fs.existsSync(filePath)) {
-        filePath = path.join(settings.downloadPath, `video_${ts}_${c}.mp4`);
+        filePath = path.join(settings.downloadPath, `video_${ts}_${c}${ext}`);
         c++;
       }
 
@@ -333,12 +412,26 @@ function setupIPC() {
             Referer: "https://www.bilibili.com",
           });
         } else if (isBtch) {
-          await downloadHttp(url, filePath, (p) => send("download-progress", p));
+          if (extractAudio) {
+            // 直链平台（快手/抖音等）：先下载 mp4，再用 ffmpeg 提取音频为 MP3
+            if (!ffmpegPath) throw new Error("未找到 ffmpeg，无法提取音频");
+            const tmpMp4 = `${filePath}.tmp.mp4`;
+            await downloadHttp(url, tmpMp4, (p) => send("download-progress", p));
+            await extractAudioToMp3(tmpMp4, filePath, ffmpegPath);
+            if (fs.existsSync(tmpMp4)) fs.unlinkSync(tmpMp4);
+          } else {
+            await downloadHttp(url, filePath, (p) => send("download-progress", p));
+          }
         } else {
           await engine.download(url, formatId, filePath, (p) => send("download-progress", p), {
             cookiesBrowser,
             cookiesFile,
             proxy,
+            ffmpegPath,
+            writeSubs,
+            subLang,
+            extractAudio,
+            poToken,
           });
         }
         const size = fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
@@ -486,6 +579,11 @@ app.whenReady().then(() => {
   pwEngine = new PlaywrightEngine();
   fs.mkdirSync(store.getSettings().downloadPath, { recursive: true });
   setupIPC();
+  // 启动 PO Token 服务（YouTube 高清下载必需；已运行则跳过）
+  startPotServer().then((st) => {
+    if (st.running) console.log(`[pot] PO Token 服务就绪 v${st.version || "?"}${st.started ? "（本次启动）" : "（已在运行）"}`);
+    else console.warn("[pot] PO Token 服务未就绪:", st.error || "未知错误");
+  });
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -496,4 +594,10 @@ app.on("window-all-closed", () => {
 });
 app.on("before-quit", () => {
   if (pwEngine) pwEngine.close?.();
+  if (potServerProcess) {
+    try {
+      potServerProcess.kill();
+    } catch {}
+    potServerProcess = null;
+  }
 });

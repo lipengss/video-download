@@ -4,11 +4,11 @@
  */
 
 const path = require("path");
-const { douyin, igdl, ttdl, twitter, youtube, fbdown } = require("btch-downloader");
+const { douyin, igdl, ttdl, twitter, youtube, fbdown, kuaishou } = require("btch-downloader");
 const platforms = require("../shared/platforms.json");
 
 // btch 函数名 → 实际函数映射
-const BTCH_FN_MAP = { douyin, igdl, ttdl, twitter, youtube, fbdown };
+const BTCH_FN_MAP = { douyin, igdl, ttdl, twitter, youtube, fbdown, kuaishou };
 
 // 构建有 btch 函数的平台映射
 const BTCH_PLATFORMS = platforms
@@ -113,6 +113,23 @@ class BtchEngine {
           isBtch: true,
         });
       }
+    } else if (data?.videoUrl) {
+      // 快手格式: { success, videoUrl, title, author, username }
+      items.push({
+        index: 0,
+        url: data.videoUrl,
+        thumbnail: data.thumbnail || "",
+        fileName: `${(data.title || "kuaishou").replace(/[<>:"/\\|?*]/g, "_").substring(0, 40)}.mp4`,
+        type: "video",
+        width: 0,
+        height: 0,
+        aspectRatio: "未知",
+        resolution: "未知",
+        quality: "",
+        formats: [],
+        bestFormatId: null,
+        isBtch: true,
+      });
     } else if (data?.data) {
       // 通用格式
       const d = data.data;

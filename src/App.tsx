@@ -36,6 +36,9 @@ export function App() {
   const [defaultQuality, setDefaultQuality] = useState("1080P 高清");
   const [useProxy, setUseProxy] = useState(false);
   const [proxyUrl, setProxyUrl] = useState("");
+  const [writeSubs, setWriteSubs] = useState(false);
+  const [poToken, setPoToken] = useState("");
+  const [potStatus, setPotStatus] = useState<{ running: boolean; version?: string | null } | null>(null);
   const [previewVideo, setPreviewVideo] = useState<{ path: string; name: string } | null>(null);
   const [tab, setTab] = useState<"queue" | "history">("queue");
   const [activated, setActivated] = useState(false);
@@ -69,6 +72,8 @@ export function App() {
       if (s.cookies) setCookiesMap(s.cookies);
       if (typeof s.useProxy === "boolean") setUseProxy(s.useProxy);
       if (s.proxyUrl) setProxyUrl(s.proxyUrl);
+      if (typeof s.writeSubs === "boolean") setWriteSubs(s.writeSubs);
+      if (s.poToken) setPoToken(s.poToken);
       if (s.activated) setActivated(true);
       if (s.activatedExpiresAt) setExpiresAt(s.activatedExpiresAt);
     });
@@ -79,6 +84,7 @@ export function App() {
       if (!r.activated) setShowActivation(true);
     });
     refreshAll();
+    refreshPotStatus();
     const api = (window as any).electronAPI;
     if (!api) return;
 
@@ -177,6 +183,7 @@ export function App() {
         const opts: any = {};
         if (cookiesMap[pf.name]) opts.cookiesFile = cookiesMap[pf.name];
         if (useProxy && proxyUrl) opts.proxy = proxyUrl;
+        if (poToken) opts.poToken = poToken;
         const r = await ipc.parseUrl(clean, opts);
         if (r.error) {
           failedUrls.push(pf.label);
@@ -187,6 +194,10 @@ export function App() {
             status: "failed",
           });
           continue;
+        }
+        // yt-dlp 失败降级到了 btch 低清源 → 明确提示，避免误以为 cookies 无效
+        if (r._fallback) {
+          showToast(`${pf.label} 高清解析失败，已降级低清源${r._ytError ? "：" + String(r._ytError).slice(0, 60) : ""}`, "error");
         }
         const m = r.media?.[0];
         if (!m) {
@@ -262,7 +273,7 @@ export function App() {
     if (downloadingRef.current) return;
 
     // 使用函数式 setState 获取最新队列，提取第一个等待任务
-    const taskRef: { id: number; media: Media; format: string | null } | null = await new Promise((resolve) => {
+    const taskRef: { id: number; media: Media; format: string | null; extractAudio?: boolean } | null = await new Promise((resolve) => {
       setQueue((q) => {
         const next = q.find((it) => it.status === "queued");
         if (!next || !next.media) {
@@ -273,7 +284,7 @@ export function App() {
         }
         setDownloading(true);
         downloadingRef.current = true;
-        resolve({ id: next.id, media: next.media, format: next.format });
+        resolve({ id: next.id, media: next.media, format: next.format, extractAudio: next.extractAudio });
         return q.map((it) => (it.id === next.id ? { ...it, status: "downloading", pct: 0 } : it));
       });
     });
@@ -302,6 +313,7 @@ export function App() {
     const pf = detectPlatform(m.url || url);
     if (cookiesMap[pf.name]) opts.cookiesFile = cookiesMap[pf.name];
     if (useProxy && proxyUrl) opts.proxy = proxyUrl;
+    if (poToken) opts.poToken = poToken;
     ipc.startDownload({
       url: dl,
       formatId: fmt || m.bestFormatId,
@@ -310,14 +322,16 @@ export function App() {
       _bvid: m._bvid,
       _cid: m._cid,
       originalUrl: m._parseUrl || m.url,
+      extractAudio: !!taskRef.extractAudio,
+      writeSubs,
       ...opts,
     });
   };
   nextRef.current = processNext;
 
-  const addToQueue = (m: Media, fmt: string | null) => {
+  const addToQueue = (m: Media, fmt: string | null, extractAudio = false) => {
     if (!activated) {
-      pendingDownloadRef.current = () => addToQueue(m, fmt);
+      pendingDownloadRef.current = () => addToQueue(m, fmt, extractAudio);
       setShowActivation(true);
       return;
     }
@@ -332,6 +346,7 @@ export function App() {
         isBtch: m.isBtch,
         _bvid: m._bvid,
         _cid: m._cid,
+        extractAudio,
       },
     ]);
     if (!downloadingRef.current) window.setTimeout(() => nextRef.current(), 100);
@@ -364,7 +379,7 @@ export function App() {
   };
 
   const saveSettings = () => {
-    ipc.saveSettings({ downloadPath: dlPath, defaultQuality, useProxy, proxyUrl, cookies: cookiesMap });
+    ipc.saveSettings({ downloadPath: dlPath, defaultQuality, useProxy, proxyUrl, cookies: cookiesMap, writeSubs, poToken });
     setShowSettings(false);
     showToast("设置已保存", "success");
   };
@@ -387,8 +402,19 @@ export function App() {
     if (!r.path) return;
     const next = { ...cookiesMap, [name]: r.path };
     setCookiesMap(next);
-    await ipc.saveSettings({ downloadPath: dlPath, defaultQuality, useProxy, proxyUrl, cookies: next });
+    await ipc.saveSettings({ downloadPath: dlPath, defaultQuality, useProxy, proxyUrl, cookies: next, poToken });
     showToast(`已导入 ${name} cookies`, "success");
+  };
+
+  const refreshPotStatus = () => {
+    ipc.getPotStatus().then((s) => setPotStatus(s));
+  };
+
+  const startPot = async () => {
+    const r = await ipc.startPotServer();
+    setPotStatus({ running: r.running, version: r.version });
+    if (r.running) showToast(`PO Token 服务已就绪${r.started ? "" : "（已在运行）"}`, "success");
+    else showToast(r.error || "PO Token 服务启动失败", "error");
   };
 
   return (
@@ -431,6 +457,7 @@ export function App() {
               onSelectMedia={setActiveMedia}
               onFormatChange={(mediaKey, formatId) => setFormatMap((prev) => ({ ...prev, [mediaKey]: formatId }))}
               onAddToQueue={addToQueue}
+              onAddAudioToQueue={(m, fmt) => addToQueue(m, fmt, true)}
               onAddAllToQueue={() => {
                 if (!activated) {
                   pendingDownloadRef.current = () => {
@@ -505,11 +532,17 @@ export function App() {
         cookiesMap={cookiesMap}
         useProxy={useProxy}
         proxyUrl={proxyUrl}
+        writeSubs={writeSubs}
+        poToken={poToken}
+        potStatus={potStatus}
+        onStartPot={startPot}
         onDlPathChange={setDlPath}
         onDefaultQualityChange={setDefaultQuality}
         onCookiesChange={setCookiesMap}
         onUseProxyChange={setUseProxy}
         onProxyUrlChange={setProxyUrl}
+        onWriteSubsChange={setWriteSubs}
+        onPoTokenChange={setPoToken}
         onSave={saveSettings}
         onSelectDir={async () => ipc.selectDir()}
         onPickCookies={pickCookies}

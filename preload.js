@@ -12,6 +12,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   startDownload: (p) => ipcRenderer.invoke("start-download", p),
   cancelDownload: () => ipcRenderer.invoke("cancel-download"),
 
+  // PO Token 服务
+  getPotStatus: () => ipcRenderer.invoke("get-pot-status"),
+  startPotServer: () => ipcRenderer.invoke("start-pot-server"),
+
   // Events
   onDownloadProgress: (cb) => {
     const h = (_, d) => cb(d);

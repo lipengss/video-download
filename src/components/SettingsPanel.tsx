@@ -1,4 +1,4 @@
-import { FolderOpen, Globe, Settings, X } from "lucide-react";
+import { Captions, FolderOpen, Globe, Key, Settings, X } from "lucide-react";
 import { OverlayScrollbarsComponent } from "overlayscrollbars-react";
 import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
@@ -12,11 +12,17 @@ interface SettingsPanelProps {
   cookiesMap: Record<string, string>;
   useProxy: boolean;
   proxyUrl: string;
+  writeSubs: boolean;
+  poToken: string;
+  potStatus: { running: boolean; version?: string | null } | null;
+  onStartPot: () => void;
   onDlPathChange: (path: string) => void;
   onDefaultQualityChange: (quality: string) => void;
   onCookiesChange: (cookies: Record<string, string>) => void;
   onUseProxyChange: (use: boolean) => void;
   onProxyUrlChange: (url: string) => void;
+  onWriteSubsChange: (v: boolean) => void;
+  onPoTokenChange: (v: string) => void;
   onSave: () => void;
   onSelectDir: () => Promise<{ path: string | null }>;
   onPickCookies: (name: string) => Promise<void>;
@@ -30,11 +36,17 @@ export function SettingsPanel({
   cookiesMap,
   useProxy,
   proxyUrl,
+  writeSubs,
+  poToken,
+  potStatus,
+  onStartPot,
   onDlPathChange,
   onDefaultQualityChange,
   onCookiesChange,
   onUseProxyChange,
   onProxyUrlChange,
+  onWriteSubsChange,
+  onPoTokenChange,
   onSave,
   onSelectDir,
   onPickCookies,
@@ -98,6 +110,26 @@ export function SettingsPanel({
               </button>
             ))}
           </div>
+          <p className="mb-3 text-[11px] font-bold uppercase tracking-[1.6px] text-[#627895]">字幕</p>
+          <div className="mb-6 space-y-2 rounded-[12px] bg-[#172236] px-3 py-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Captions className="h-4 w-4 text-[#8ea0bd]" />
+                <span className="text-xs">同时下载字幕</span>
+              </div>
+              <button
+                onClick={() => onWriteSubsChange(!writeSubs)}
+                className={cn("relative h-6 w-11 rounded-full", writeSubs ? "bg-[#4e73ff]" : "bg-[#2a3952]")}
+              >
+                <span
+                  className={cn(
+                    "absolute top-1 h-4 w-4 rounded-full bg-white transition",
+                    writeSubs ? "left-6" : "left-1",
+                  )}
+                />
+              </button>
+            </div>
+          </div>
           <p className="mb-3 text-[11px] font-bold uppercase tracking-[1.6px] text-[#627895]">Cookies 管理</p>
           <div className="mb-6 space-y-2">
             {PLATFORMS.map((p) => (
@@ -153,6 +185,50 @@ export function SettingsPanel({
                 className="h-9 w-full rounded-[10px] border border-white/[0.08] bg-[#1d2a40] px-3 text-xs outline-none"
               />
             )}
+          </div>
+          <p className="mb-3 mt-6 text-[11px] font-bold uppercase tracking-[1.6px] text-[#627895]">PO Token 服务</p>
+          <div className="mb-4 space-y-2 rounded-[12px] bg-[#172236] px-3 py-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span
+                  className={cn(
+                    "h-2 w-2 rounded-full",
+                    potStatus?.running ? "bg-emerald-400" : "bg-[#5b6b85]",
+                  )}
+                />
+                <span className="text-xs">
+                  {potStatus?.running ? `已运行${potStatus.version ? ` v${potStatus.version}` : ""}` : "未运行"}
+                </span>
+              </div>
+              {potStatus?.running ? (
+                <span className="text-[11px] text-emerald-300">自动获取 PO Token</span>
+              ) : (
+                <button onClick={onStartPot} className="text-[11px] font-semibold text-[#7f98ff]">
+                  启动服务
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] leading-relaxed text-[#627895]">
+              自动获取 PO Token，解决 YouTube 高清下载 403 报错。
+            </p>
+          </div>
+          <p className="mb-3 text-[11px] font-bold uppercase tracking-[1.6px] text-[#627895]">PO Token（高级）</p>
+          <div className="space-y-2 rounded-[12px] bg-[#172236] px-3 py-3">
+            <div className="flex items-center gap-2">
+              <Key className="h-4 w-4 text-[#8ea0bd]" />
+              <span className="text-xs">YouTube PO Token</span>
+            </div>
+            <input
+              value={poToken}
+              onChange={(e) => onPoTokenChange(e.target.value)}
+              placeholder="web.gvs+…（可选）"
+              className="h-9 w-full rounded-[10px] border border-white/[0.08] bg-[#1d2a40] px-3 text-xs outline-none"
+            />
+            <p className="text-[11px] leading-relaxed text-[#627895]">
+              YouTube 高清下载需 PO Token，否则会 403 报错。推荐运行
+              <span className="text-[#9fb3d6]"> bgutil-ytdlp-pot-provider </span>
+              自动获取；也可手动粘贴完整 token。
+            </p>
           </div>
         </OverlayScrollbarsComponent>
         <div className="border-t border-white/[0.07] p-5">
