@@ -135,7 +135,9 @@ class YtDlpEngine {
       } else if (formatId) {
         // 合并所选画质视频 + 最佳音频（YouTube 高清是分离的 DASH 流，单独 -f 会没声音）
         // 优先 m4a 音频，保证与 mp4 视频合并后仍是 .mp4（webm 音频会迫使 ffmpeg 转成 .mkv）
-        args.push("-f", `${formatId}+bestaudio[ext=m4a]/bestaudio/${formatId}/best`);
+        // 注意：不能加裸 "/bestaudio" 兜底，否则 X/Twitter 等「视频+音频已合一」的
+        // 直链会因选不到 m4a 而退到纯音频流，导致「只有声音没有画面」。
+        args.push("-f", `${formatId}+bestaudio[ext=m4a]/${formatId}+bestaudio/${formatId}/best`);
       } else {
         // 默认选最高画质视频+最佳音频合并
         args.push("-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best");

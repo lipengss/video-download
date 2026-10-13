@@ -34,6 +34,11 @@ const ytDlpPath = isDev ? YTDLP_DEV : YTDLP_EXE;
 const ffmpegPath = fs.existsSync(isDev ? FFMPEG_DEV : FFMPEG_EXE) ? (isDev ? FFMPEG_DEV : FFMPEG_EXE) : null;
 const store = new Storage(USER_DATA);
 
+// ─── 价格开关 ───────────────────────────────────────────────
+// true  = 收费模式（需输入激活码验证）
+// false = 免费模式（跳过激活码验证，无需激活）
+const PRICE_ENABLED = false;
+
 /** 读取 Vite 实际端口（自动协商，避免端口冲突） */
 function getVitePort() {
   try {
@@ -236,6 +241,8 @@ function setupIPC() {
 
   // 检查激活状态（启动时调用 API 实时验证）
   ipcMain.handle("check-activated", async () => {
+    // 价格开关关闭 → 免费模式，直接放行
+    if (!PRICE_ENABLED) return { activated: true };
     const settings = store.getSettings();
     if (!settings.activated) return { activated: false };
 
@@ -298,73 +305,65 @@ function setupIPC() {
   }
 
   ipcMain.handle("parse-url", async (event, url, opts) => {
+    const errors = [];
+
     // B站: 专用引擎
     if (PLATFORM_REGEX.find((p) => p.name === "bilibili")?.test.test(url) && biliEngine) {
       try {
         return await biliEngine.parse(url);
       } catch (biliErr) {
+        errors.push(`B站: ${biliErr.message}`);
         console.error("[parse-url] bilibili fallback:", biliErr.message);
       }
     }
 
-    // btch 优先的平台（Instagram / 抖音 / TikTok 等不需要 cookies）
     const btchFirst = isBtchFirst(url);
+
+    // btch 优先的平台（Instagram / 抖音 / TikTok 等），失败后继续 fallback
     if (btchFirst && btchEngine) {
       try {
         return await btchEngine.parse(url);
       } catch (btchErr) {
+        errors.push(`btch: ${btchErr.message}`);
         console.error("[parse-url] btch-first fallback:", btchErr.message);
       }
     }
 
-    // yt-dlp (YouTube 推荐用 cookies 获取高清画质)
+    // yt-dlp
     if (engine && engine.isAvailable()) {
       try {
         return await engine.parse(url, opts || {});
       } catch (ytErr) {
-        // 关键诊断日志：yt-dlp 失败原因（常见：未开代理/网络不通/bot检测/yt-dlp 缺失）
+        errors.push(`yt-dlp: ${ytErr.message}`);
         console.error("[parse-url] yt-dlp 解析失败 →", ytErr.message);
-        if (btchFirst) return { error: `解析失败: ${ytErr.message}\n\n💡 试试勾选「cookies.txt 文件」并导入登录信息` };
-        // YouTube/其他: yt-dlp 失败 → btch 后备
-        if (btchEngine) {
-          try {
-            const r = await btchEngine.parse(url);
-            r._fallback = true;
-            r._ytError = ytErr.message;
-            return r;
-          } catch (btchErr) {
-            console.error("[parse-url] yt-dlp→btch fallback:", btchErr.message);
-          }
-        }
-        if (pwEngine) {
-          try {
-            const r = await pwEngine.parse(url);
-            r._fallback = true;
-            r._ytError = ytErr.message;
-            return r;
-          } catch (pwErr) {
-            return { error: `${ytErr.message}\n${pwErr.message}` };
-          }
-        }
-        return { error: ytErr.message };
       }
     }
-    if (btchEngine) {
+
+    // 非 btch 优先的平台：yt-dlp 失败 → btch 后备
+    if (!btchFirst && btchEngine) {
       try {
-        return await btchEngine.parse(url);
-      } catch (err) {
-        console.error("[parse-url] btch fallback:", err.message);
+        const r = await btchEngine.parse(url);
+        r._fallback = true;
+        return r;
+      } catch (btchErr) {
+        errors.push(`btch-fallback: ${btchErr.message}`);
+        console.error("[parse-url] yt-dlp→btch fallback:", btchErr.message);
       }
     }
+
     // Playwright 兜底（处理强反爬站点）
     if (pwEngine) {
       try {
-        return await pwEngine.parse(url);
-      } catch (err) {
-        return { error: err.message };
+        const r = await pwEngine.parse(url);
+        r._fallback = true;
+        return r;
+      } catch (pwErr) {
+        errors.push(`Playwright: ${pwErr.message}`);
+        console.error("[parse-url] playwright fallback:", pwErr.message);
       }
     }
-    return { error: "下载引擎不可用" };
+
+    return { error: errors.length > 0 ? errors.join("\n") : "下载引擎不可用" };
   });
 
   // 取消下载
@@ -382,8 +381,8 @@ function setupIPC() {
     ) => {
       const settings = store.getSettings();
 
-      // 激活码校验（防御层）
-      if (!settings.activated) {
+      // 激活码校验（防御层；价格开关关闭时跳过）
+      if (PRICE_ENABLED && !settings.activated) {
         return { error: "软件未激活，请先输入激活码" };
       }
 
