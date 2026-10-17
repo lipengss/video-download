@@ -11,15 +11,6 @@ export interface VideoFormat {
   vcodec?: string;
   acodec?: string;
   tbr?: number;
-  /** B 站专用 */
-  qn?: number;
-  needLogin?: boolean;
-}
-
-/** btch 引擎的多画质链接 */
-export interface BtchLink {
-  url: string;
-  quality: string;
 }
 
 /** 解析返回的单个媒体项 */
@@ -39,17 +30,6 @@ export interface Media {
   formats: VideoFormat[];
   bestFormatId: string | null;
 
-  // ── 引擎标记 ──
-  /** btch 引擎解析，下载时走 CDN 直链 */
-  isBtch?: boolean;
-  /** btch 引擎同视频不同画质的链接列表 */
-  _links?: BtchLink[];
-
-  // ── B 站专用 ──
-  _bvid?: string;
-  _cid?: number;
-  _aid?: number;
-
   // ── 内部标记 ──
   /** 解析时使用的原始 URL（用于历史匹配） */
   _parseUrl?: string;
@@ -61,8 +41,6 @@ export interface ParseResult {
   engine: string;
   error?: string;
   media: Media[];
-  _fallback?: boolean;
-  _ytError?: string;
 }
 
 /** 历史记录 */
@@ -91,11 +69,10 @@ export interface QItem {
   pct: number;
   filePath?: string;
   error?: string;
-  isBtch?: boolean;
-  _bvid?: string;
-  _cid?: number;
   /** true = 下载时提取音频为 MP3 */
   extractAudio?: boolean;
+  /** 下载阶段标识，如 "merging"（DASH 流合并中） */
+  phase?: string;
 }
 
 /** 下载进度事件 */
@@ -106,6 +83,8 @@ export interface DownloadProgress {
   totalSize?: string;
   speed?: string;
   eta?: string;
+  /** 下载阶段标识，如 "merging"（DASH 流合并中） */
+  phase?: string;
 }
 
 /** 下载完成事件 */
@@ -138,6 +117,15 @@ export interface LocalFile {
   path: string;
   size: number;
   time: string;
+}
+
+/** cookies.txt 导入校验结果 */
+export interface CookiesCheck {
+  ok: boolean;
+  reason: string;
+  missing: string[];
+  expired: string[];
+  total: number;
 }
 
 /** 应用设置 */

@@ -25,14 +25,27 @@ class YtDlpEngine {
     }
   }
 
+  /**
+   * 解析 JS 运行时：YouTube 等站点依赖 EJS 运行时（--js-runtimes）。
+   * 打包后系统 PATH 上不一定有 node，用 Electron 自带的 node 模式
+   * （ELECTRON_RUN_AS_NODE=1）兜底，保证无论 dev 还是打包后都能解析。
+   */
+  _jsRuntime() {
+    if (process.versions && process.versions.electron) {
+      return { args: ["--js-runtimes", `node:${process.execPath}`], env: { ELECTRON_RUN_AS_NODE: "1" } };
+    }
+    return { args: ["--js-runtimes", "node"], env: null };
+  }
+
   // ─── URL 解析 ────────────────────────────────────────
 
   parse(url, opts = {}) {
-    const args = ["--dump-json", "--no-playlist", "--js-runtimes", "node"];
+    const rt = this._jsRuntime();
+    const args = ["--dump-json", "--no-playlist", ...rt.args];
     if (opts.cookiesBrowser) args.push("--cookies-from-browser", opts.cookiesBrowser);
     if (opts.cookiesFile) args.push("--cookies", opts.cookiesFile);
     if (opts.proxy) args.push("--proxy", opts.proxy);
-    const extractorArgs = ["player_client=web_embedded"];
+    const extractorArgs = ["player_client=web_safari"];
     const poToken = this._normalizePoToken(opts.poToken);
     if (poToken) extractorArgs.push(`po_token=${poToken}`);
     args.push("--extractor-args", `youtube:${extractorArgs.join(";")}`);
@@ -42,6 +55,7 @@ class YtDlpEngine {
       const yt = spawn(this.binaryPath, args, {
         stdio: ["ignore", "pipe", "pipe"],
         timeout: 60000,
+        env: rt.env ? { ...process.env, ...rt.env } : process.env,
       });
 
       let stdout = "",
@@ -127,7 +141,8 @@ class YtDlpEngine {
 
   download(url, formatId, filePath, onProgress, opts = {}) {
     return new Promise((resolve, reject) => {
-      const args = ["-o", filePath, "--no-playlist", "--progress", "--newline", "--no-mtime", "--js-runtimes", "node"];
+      const rt = this._jsRuntime();
+      const args = ["-o", filePath, "--no-playlist", "--progress", "--newline", "--no-mtime", ...rt.args];
       if (opts.ffmpegPath) args.push("--ffmpeg-location", opts.ffmpegPath);
       if (opts.extractAudio) {
         // 提取音频为 MP3（-x 自动选最佳音频轨，忽略 formatId）
@@ -145,7 +160,7 @@ class YtDlpEngine {
       if (opts.cookiesBrowser) args.push("--cookies-from-browser", opts.cookiesBrowser);
       if (opts.cookiesFile) args.push("--cookies", opts.cookiesFile);
       if (opts.proxy) args.push("--proxy", opts.proxy);
-      const extractorArgs = ["player_client=web_embedded"];
+      const extractorArgs = ["player_client=web_safari"];
       const poToken = this._normalizePoToken(opts.poToken);
       if (poToken) extractorArgs.push(`po_token=${poToken}`);
       args.push("--extractor-args", `youtube:${extractorArgs.join(";")}`);
@@ -155,33 +170,57 @@ class YtDlpEngine {
       }
       args.push(url);
 
-      const yt = spawn(this.binaryPath, args, { stdio: ["ignore", "pipe", "pipe"], timeout: 600000 });
+      const yt = spawn(this.binaryPath, args, {
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 600000,
+        env: rt.env ? { ...process.env, ...rt.env } : process.env,
+      });
       this._activeProcess = yt;
       let lastPct = 0;
       let stderr = "";
 
-      yt.stdout.on("data", (d) => {
-        const lines = d.toString().split(/\r?\n/).filter(Boolean);
-        for (const line of lines) {
-          // [download]  45.0% of 3.88MiB at 1.2MiB/s ETA 00:02
-          const m = line.match(
-            /\[download\]\s+([\d.]+)%\s+of\s+~?([\d.]+\s*\w+)\s+at\s+([\d.]+\s*\w+\/s)\s+ETA\s+(\S+)/i,
-          );
-          if (m && parseFloat(m[1]) >= lastPct) {
-            lastPct = parseFloat(m[1]);
-            if (typeof onProgress === "function") {
-              onProgress({
-                percent: parseFloat(m[1]),
-                totalSize: m[2].trim(),
-                speed: m[3].trim(),
-                eta: m[4].trim(),
-              });
-            }
+      const handleLine = (line) => {
+        // 每个下载段（DASH 视频段/音频段分开下）开始时重置进度，
+        // 避免音频段进度（0→100）被视频段已经到达的 100% 吞掉，导致进度条卡在 100%
+        if (/\[download\]\s+Destination:/i.test(line)) {
+          lastPct = 0;
+          return;
+        }
+        // 合并/封装阶段没有百分比输出 → 明确发送「合并中」，避免进度条长时间卡住
+        if (/\[(Merger|VideoRemuxer|AudioRemuxer|FixupM3u8|FixupM4a|ffmpeg)\]/i.test(line)) {
+          if (typeof onProgress === "function") {
+            onProgress({ percent: 100, totalSize: "", speed: "", eta: "", phase: "merging" });
+          }
+          return;
+        }
+        // [download]  45.0% of 3.88MiB at 1.2MiB/s ETA 00:02
+        const m = line.match(
+          /\[download\]\s+([\d.]+)%\s+of\s+~?([\d.]+\s*\w+)\s+at\s+([\d.]+\s*\w+\/s)\s+ETA\s+(\S+)/i,
+        );
+        if (m && parseFloat(m[1]) >= lastPct) {
+          lastPct = parseFloat(m[1]);
+          if (typeof onProgress === "function") {
+            onProgress({
+              percent: parseFloat(m[1]),
+              totalSize: m[2].trim(),
+              speed: m[3].trim(),
+              eta: m[4].trim(),
+            });
           }
         }
-      });
+      };
 
-      yt.stderr.on("data", (d) => (stderr += d.toString()));
+      const handleChunk = (d) => {
+        const lines = d.toString().split(/\r?\n/).filter(Boolean);
+        for (const line of lines) handleLine(line);
+      };
+
+      // 进度/日志行在不同 yt-dlp 版本下可能输出到 stdout 或 stderr，两路都解析
+      yt.stdout.on("data", handleChunk);
+      yt.stderr.on("data", (d) => {
+        stderr += d.toString();
+        handleChunk(d);
+      });
 
       yt.on("close", (code) => {
         this._activeProcess = null;
@@ -206,15 +245,17 @@ class YtDlpEngine {
   // ─── 工具方法 ─────────────────────────────────────
 
   /**
-   * 规范化 PO Token：用户可能粘贴完整 "web_embedded.gvs+XXX"，也可能只粘贴 token 本体。
-   * 完整格式为 <client>.<type>+<token>，否则默认补 "web_embedded.gvs+" 前缀
-   * （引擎强制 web_embedded 客户端，因为它提供直接 DASH 流且用 GVS PO Token）。
+   * 规范化 PO Token：用户可能粘贴完整 "web_safari.gvs+XXX"，也可能只粘贴 token 本体。
+   * 完整格式为 <client>.<type>+<token>，否则默认补 "web_safari.gvs+" 前缀。
+   * 引擎强制 web_safari 客户端：YouTube 对 web/web_embedded 客户端启用了 SABR-only
+   * 流实验（高码率格式无直接 URL，只剩 360p），而 web_safari 仍返回带直链的高清
+   * 渐进式格式（最高 1080p），且无需 PO Token 即可取流。
    */
   _normalizePoToken(t) {
     if (!t) return "";
     t = String(t).trim();
     if (/^[a-zA-Z_]+\.[a-zA-Z_+]+[+:]/.test(t)) return t;
-    return `web_embedded.gvs+${t}`;
+    return `web_safari.gvs+${t}`;
   }
 
   _fileName(info) {

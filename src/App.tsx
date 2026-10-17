@@ -89,7 +89,11 @@ export function App() {
     if (!api) return;
 
     const unsubProgress = api.onDownloadProgress?.((d: DownloadProgress) =>
-      setQueue((q) => q.map((it) => (it.status === "downloading" ? { ...it, pct: Math.round(d.percent || 0) } : it))),
+      setQueue((q) =>
+        q.map((it) =>
+          it.status === "downloading" ? { ...it, pct: Math.round(d.percent || 0), phase: d.phase } : it,
+        ),
+      ),
     );
     const unsubComplete = api.onDownloadComplete?.((d: DownloadComplete) => {
       setQueue((q) =>
@@ -194,10 +198,6 @@ export function App() {
             status: "failed",
           });
           continue;
-        }
-        // yt-dlp 失败降级到了 btch 低清源 → 明确提示，避免误以为 cookies 无效
-        if (r._fallback) {
-          showToast(`${pf.label} 高清解析失败，已降级低清源${r._ytError ? "：" + String(r._ytError).slice(0, 60) : ""}`, "error");
         }
         const m = r.media?.[0];
         if (!m) {
@@ -304,11 +304,7 @@ export function App() {
 
     // 启动下载
     const fmt = taskRef.format;
-    let dl = m.url;
-    if (m.isBtch && m._links && fmt) {
-      const idx = parseInt(fmt.replace("q", ""), 10);
-      if (m._links[idx]) dl = m._links[idx].url;
-    }
+    const dl = m.url;
     const opts: any = {};
     const pf = detectPlatform(m.url || url);
     if (cookiesMap[pf.name]) opts.cookiesFile = cookiesMap[pf.name];
@@ -318,9 +314,7 @@ export function App() {
       url: dl,
       formatId: fmt || m.bestFormatId,
       index: 0,
-      isBtch: m.isBtch || false,
-      _bvid: m._bvid,
-      _cid: m._cid,
+      title: m.fileName,
       originalUrl: m._parseUrl || m.url,
       extractAudio: !!taskRef.extractAudio,
       writeSubs,
@@ -343,9 +337,6 @@ export function App() {
         format: fmt,
         status: "queued",
         pct: 0,
-        isBtch: m.isBtch,
-        _bvid: m._bvid,
-        _cid: m._cid,
         extractAudio,
       },
     ]);
@@ -403,7 +394,16 @@ export function App() {
     const next = { ...cookiesMap, [name]: r.path };
     setCookiesMap(next);
     await ipc.saveSettings({ downloadPath: dlPath, defaultQuality, useProxy, proxyUrl, cookies: next, poToken });
-    showToast(`已导入 ${name} cookies`, "success");
+
+    const check = r.check;
+    if (name === "youtube" && check && !check.ok) {
+      showToast(`已导入，但 ${check.reason}`, "error");
+    } else {
+      showToast(
+        `已导入 ${name} cookies${name === "youtube" && check?.ok ? ` · ${check.reason}` : ""}`,
+        "success",
+      );
+    }
   };
 
   const refreshPotStatus = () => {
@@ -471,9 +471,6 @@ export function App() {
                         format: formatMap[m.url || m.fileName] || m.bestFormatId,
                         status: "queued" as const,
                         pct: 0,
-                        isBtch: m.isBtch,
-                        _bvid: m._bvid,
-                        _cid: m._cid,
                       })),
                     ]);
                     if (!downloadingRef.current) window.setTimeout(() => nextRef.current(), 100);
@@ -491,9 +488,6 @@ export function App() {
                     format: formatMap[m.url || m.fileName] || m.bestFormatId,
                     status: "queued" as const,
                     pct: 0,
-                    isBtch: m.isBtch,
-                    _bvid: m._bvid,
-                    _cid: m._cid,
                   })),
                 ]);
                 if (!downloadingRef.current) window.setTimeout(() => nextRef.current(), 100);

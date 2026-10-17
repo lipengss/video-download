@@ -29,7 +29,7 @@ export function QueuePanel({
   const statusLabel = (q: QItem) => {
     switch (q.status) {
       case "downloading":
-        return `${q.pct}%`;
+        return q.phase === "merging" ? "合并中" : `${q.pct}%`;
       case "done":
         return "完成";
       case "cancelled":

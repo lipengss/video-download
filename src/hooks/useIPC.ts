@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  CookiesCheck,
   DownloadComplete,
   DownloadError,
   DownloadProgress,
@@ -52,7 +53,10 @@ export function useIPC() {
     openFile: (fp: string) => (api?.openFile?.(fp) ?? Promise.resolve({ ok: true })) as Promise<{ ok: boolean }>,
     openFolder: () => (api?.openFolder?.() ?? Promise.resolve({ ok: true })) as Promise<{ ok: boolean }>,
     selectCookiesFile: () =>
-      (api?.selectCookiesFile?.() ?? Promise.resolve({ path: null })) as Promise<{ path: string | null }>,
+      (api?.selectCookiesFile?.() ?? Promise.resolve({ path: null, check: null })) as Promise<{
+        path: string | null;
+        check: CookiesCheck | null;
+      }>,
     listLocalFiles: () => (api?.listLocalFiles?.() ?? Promise.resolve([])) as Promise<LocalFile[]>,
     fileExists: (name: string) =>
       (api?.fileExists?.(name) ?? Promise.resolve({ exists: false })) as Promise<{

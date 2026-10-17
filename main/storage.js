@@ -28,6 +28,7 @@ class Storage {
   constructor(userDataPath) {
     this._settingsFile = path.join(userDataPath, "settings.json");
     this._historyFile = path.join(userDataPath, "history.json");
+    this._windowStateFile = path.join(userDataPath, "window-state.json");
     this._cacheDir = path.join(userDataPath, "thumb_cache");
     ensureDir(this._cacheDir);
   }
@@ -38,6 +39,14 @@ class Storage {
 
   saveSettings(s) {
     saveJSON(this._settingsFile, s);
+  }
+
+  getWindowState() {
+    return loadJSON(this._windowStateFile, null);
+  }
+
+  saveWindowState(s) {
+    saveJSON(this._windowStateFile, s);
   }
 
   getHistory() {

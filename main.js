@@ -2,19 +2,15 @@
  * VideoDL Pro - Electron 主进程
  */
 
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, screen } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const https = require("https");
 const http = require("http");
-const { execFile, spawn } = require("child_process");
+const { spawn } = require("child_process");
 const os = require("os");
 const { YtDlpEngine } = require("./engine/ytdlp");
-const { BtchEngine } = require("./engine/btch");
-const { BilibiliEngine } = require("./engine/bilibili");
-const { PlaywrightEngine } = require("./engine/playwright");
 const { Storage } = require("./main/storage");
-const { downloadHttp } = require("./main/download-http");
 const { validateCode } = require("./main/activation");
 const platforms = require("./shared/platforms.json");
 
@@ -66,10 +62,9 @@ function isViteRunning(port) {
 
 let mainWindow = null;
 let engine = null;
-let btchEngine = null;
-let biliEngine = null;
-let pwEngine = null;
 let activeDownloads = new Map(); // track active download processes for cancellation
+let currentCancelled = false; // 当前下载是否已被用户取消（取消时不再上报错误）
+let currentFilePath = null; // 当前下载的目标文件，取消时清理
 
 // ─── PO Token 服务（bgutil-ytdlp-pot-provider）────────────────
 // YouTube 高清下载需 PO Token；bgutil 服务在本地 4416 端口生成 token，yt-dlp 插件自动调用。
@@ -126,23 +121,42 @@ async function startPotServer() {
   }
 }
 
-/** 用 ffmpeg 提取音频轨为 MP3（供 btch/B站 等直链下载后转码） */
-function extractAudioToMp3(inputPath, outputPath, ffmpegBin) {
-  return new Promise((resolve, reject) => {
-    const args = ["-y", "-i", inputPath, "-vn", "-acodec", "libmp3lame", "-q:a", "2", outputPath];
-    execFile(ffmpegBin, args, { windowsHide: true }, (err) => {
-      if (err) reject(new Error("音频提取失败：" + (err.message || "ffmpeg 错误")));
-      else resolve();
-    });
-  });
+/** 清理文件名：去除已有扩展名、替换非法字符、限制长度 */
+function sanitizeFileName(name) {
+  if (!name) return "";
+  return String(name)
+    .replace(/\.(mp4|mkv|webm|flv|mov|m4a|mp3)$/i, "")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+    .trim()
+    .slice(0, 120);
 }
 
 // ─── 窗口 ────────────────────────────────────────────────
 
+/** 读取并校验上次的窗口状态；显示器变化导致位置越界时回退居中 */
+function restoreWindowState() {
+  const st = store.getWindowState();
+  if (!st || !Number.isFinite(st.width) || !Number.isFinite(st.height)) return null;
+  if (Number.isFinite(st.x) && Number.isFinite(st.y)) {
+    const visible = screen.getAllDisplays().some((d) => {
+      const a = d.workArea;
+      return st.x < a.x + a.width && st.x + st.width > a.x && st.y < a.y + a.height && st.y + st.height > a.y;
+    });
+    if (!visible) {
+      const { x, y, ...rest } = st;
+      return rest;
+    }
+  }
+  return st;
+}
+
 async function createWindow() {
+  const winState = restoreWindowState();
   mainWindow = new BrowserWindow({
-    width: 600,
-    height: 820,
+    width: winState?.width ?? 600,
+    height: winState?.height ?? 820,
+    x: winState?.x,
+    y: winState?.y,
     minWidth: 480,
     minHeight: 640,
     title: "VideoDL Pro",
@@ -176,7 +190,16 @@ async function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, "dist-renderer", "index.html"));
   }
+  // 恢复上次的最大化状态
+  if (winState?.maximized) mainWindow.maximize();
   mainWindow.once("ready-to-show", () => mainWindow.show());
+  // 关闭前记录窗口尺寸/位置，下次启动恢复
+  mainWindow.on("close", () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const isMax = mainWindow.isMaximized();
+    const b = mainWindow.getNormalBounds();
+    store.saveWindowState({ x: b.x, y: b.y, width: b.width, height: b.height, maximized: isMax });
+  });
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
@@ -298,78 +321,27 @@ function setupIPC() {
   ipcMain.handle("get-pot-status", () => checkPotServer());
   ipcMain.handle("start-pot-server", () => startPotServer());
 
-  /** 根据共享平台配置检测某个 URL 是否应优先用 btch 引擎 */
-  function isBtchFirst(url) {
-    const matched = PLATFORM_REGEX.find((p) => p.test.test(url));
-    return matched?.btchFirst ?? false;
-  }
-
   ipcMain.handle("parse-url", async (event, url, opts) => {
-    const errors = [];
+    const pf = PLATFORM_REGEX.find((p) => p.test.test(url));
+    console.log(`[parse-url] 开始 ${pf?.label || "未知平台"} · ${String(url).slice(0, 60)}`);
 
-    // B站: 专用引擎
-    if (PLATFORM_REGEX.find((p) => p.name === "bilibili")?.test.test(url) && biliEngine) {
-      try {
-        return await biliEngine.parse(url);
-      } catch (biliErr) {
-        errors.push(`B站: ${biliErr.message}`);
-        console.error("[parse-url] bilibili fallback:", biliErr.message);
-      }
+    if (!engine || !engine.isAvailable()) return { error: "yt-dlp 引擎不可用" };
+
+    const t0 = Date.now();
+    try {
+      const r = await engine.parse(url, opts || {});
+      console.log(`[parse-url] yt-dlp 成功 · ${Date.now() - t0}ms`);
+      return r;
+    } catch (err) {
+      console.log(`[parse-url] yt-dlp 失败 · ${err.message}`);
+      return { error: err.message };
     }
-
-    const btchFirst = isBtchFirst(url);
-
-    // btch 优先的平台（Instagram / 抖音 / TikTok 等），失败后继续 fallback
-    if (btchFirst && btchEngine) {
-      try {
-        return await btchEngine.parse(url);
-      } catch (btchErr) {
-        errors.push(`btch: ${btchErr.message}`);
-        console.error("[parse-url] btch-first fallback:", btchErr.message);
-      }
-    }
-
-    // yt-dlp
-    if (engine && engine.isAvailable()) {
-      try {
-        return await engine.parse(url, opts || {});
-      } catch (ytErr) {
-        errors.push(`yt-dlp: ${ytErr.message}`);
-        console.error("[parse-url] yt-dlp 解析失败 →", ytErr.message);
-      }
-    }
-
-    // 非 btch 优先的平台：yt-dlp 失败 → btch 后备
-    if (!btchFirst && btchEngine) {
-      try {
-        const r = await btchEngine.parse(url);
-        r._fallback = true;
-        return r;
-      } catch (btchErr) {
-        errors.push(`btch-fallback: ${btchErr.message}`);
-        console.error("[parse-url] yt-dlp→btch fallback:", btchErr.message);
-      }
-    }
-
-    // Playwright 兜底（处理强反爬站点）
-    if (pwEngine) {
-      try {
-        const r = await pwEngine.parse(url);
-        r._fallback = true;
-        return r;
-      } catch (pwErr) {
-        errors.push(`Playwright: ${pwErr.message}`);
-        console.error("[parse-url] playwright fallback:", pwErr.message);
-      }
-    }
-
-    return { error: errors.length > 0 ? errors.join("\n") : "下载引擎不可用" };
   });
 
   // 取消下载
   ipcMain.handle("cancel-download", () => {
+    currentCancelled = true;
     if (engine) engine.cancel();
-    if (btchEngine) btchEngine.cancel?.();
     return { ok: true };
   });
 
@@ -377,7 +349,7 @@ function setupIPC() {
     "start-download",
     async (
       event,
-      { url, formatId, index, cookiesBrowser, cookiesFile, proxy, isBtch, _bvid, _cid, originalUrl, downloadId, writeSubs, subLang, extractAudio, poToken },
+      { url, formatId, index, title, cookiesBrowser, cookiesFile, proxy, originalUrl, writeSubs, subLang, extractAudio, poToken },
     ) => {
       const settings = store.getSettings();
 
@@ -390,11 +362,13 @@ function setupIPC() {
 
       const ts = Date.now();
       const ext = extractAudio ? ".mp3" : ".mp4";
-      const fileName = `video_${ts}${ext}`;
+      // 文件名优先使用解析出的视频标题，非法字符已清洗；无标题时回退时间戳
+      const base = sanitizeFileName(title) || `video_${ts}`;
+      let fileName = `${base}${ext}`;
       let filePath = path.join(settings.downloadPath, fileName);
       let c = 1;
       while (fs.existsSync(filePath)) {
-        filePath = path.join(settings.downloadPath, `video_${ts}_${c}${ext}`);
+        filePath = path.join(settings.downloadPath, `${base}_${c}${ext}`);
         c++;
       }
 
@@ -403,40 +377,31 @@ function setupIPC() {
           mainWindow.webContents.send(ch, { index, fileName: path.basename(filePath), ...data });
       };
 
+      currentCancelled = false;
+      currentFilePath = filePath;
+
       try {
-        // B站: 获取实时视频流再下载
-        if (_bvid && _cid && biliEngine) {
-          const streamUrl = await biliEngine.getStreamUrl(_bvid, _cid, formatId);
-          await downloadHttp(streamUrl, filePath, (p) => send("download-progress", p), 3, {
-            Referer: "https://www.bilibili.com",
-          });
-        } else if (isBtch) {
-          if (extractAudio) {
-            // 直链平台（快手/抖音等）：先下载 mp4，再用 ffmpeg 提取音频为 MP3
-            if (!ffmpegPath) throw new Error("未找到 ffmpeg，无法提取音频");
-            const tmpMp4 = `${filePath}.tmp.mp4`;
-            await downloadHttp(url, tmpMp4, (p) => send("download-progress", p));
-            await extractAudioToMp3(tmpMp4, filePath, ffmpegPath);
-            if (fs.existsSync(tmpMp4)) fs.unlinkSync(tmpMp4);
-          } else {
-            await downloadHttp(url, filePath, (p) => send("download-progress", p));
-          }
-        } else {
-          await engine.download(url, formatId, filePath, (p) => send("download-progress", p), {
-            cookiesBrowser,
-            cookiesFile,
-            proxy,
-            ffmpegPath,
-            writeSubs,
-            subLang,
-            extractAudio,
-            poToken,
-          });
-        }
+        await engine.download(url, formatId, filePath, (p) => send("download-progress", p), {
+          cookiesBrowser,
+          cookiesFile,
+          proxy,
+          ffmpegPath,
+          writeSubs,
+          subLang,
+          extractAudio,
+          poToken,
+        });
         const size = fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
         send("download-complete", { filePath, size, originalUrl });
         return { success: true, filePath, size };
       } catch (err) {
+        // 用户主动取消：清理残留文件、不上报错误（前端已自行标记为「取消」）
+        if (currentCancelled) {
+          try {
+            if (currentFilePath && fs.existsSync(currentFilePath)) fs.unlinkSync(currentFilePath);
+          } catch {}
+          return { cancelled: true };
+        }
         send("download-error", { error: err.message, filePath });
         return { error: err.message };
       }
@@ -491,13 +456,68 @@ function setupIPC() {
   ipcMain.handle("open-folder", () => {
     shell.openPath(store.getSettings().downloadPath);
   });
+  /** 校验 cookies.txt：检查是否包含 YouTube 登录所需的会话 Cookie */
+  function validateCookiesFile(fp) {
+    const CRITICAL = [
+      "SID", "HSID", "SSID",
+      "SAPISID", "APISID",
+      "__Secure-1PSID", "__Secure-3PSID",
+      "__Secure-1PAPISID", "__Secure-3PAPISID",
+      "LOGIN_INFO",
+    ];
+    try {
+      const text = fs.readFileSync(fp, "utf8");
+      const cookies = new Map(); // name -> { domain, expiry }
+      for (const raw of text.split(/\r?\n/)) {
+        const t = raw.trim();
+        if (!t || (t.startsWith("#") && !t.startsWith("#HttpOnly_"))) continue;
+        // HttpOnly cookie 在域名前带 #HttpOnly_ 前缀，去掉后仍是 tab 分隔的 7 列
+        const parts = t.replace(/^#HttpOnly_/, "").split("\t");
+        if (parts.length < 7) continue;
+        const name = parts[5];
+        const domain = parts[0];
+        const expiry = parseInt(parts[4], 10) || 0;
+        cookies.set(name, { domain, expiry });
+      }
+
+      const now = Math.floor(Date.now() / 1000);
+      const present = CRITICAL.filter((c) => cookies.has(c));
+      const missing = CRITICAL.filter((c) => !cookies.has(c));
+      const expired = CRITICAL.filter((c) => {
+        const ck = cookies.get(c);
+        return ck && ck.expiry > 0 && ck.expiry < now;
+      });
+
+      const hasLoginInfo = cookies.has("LOGIN_INFO");
+      const hasSidTrio = ["SID", "HSID", "SSID"].every((c) => cookies.has(c));
+      // 关键：__Secure-3PSID 是 SameSite=None 的第三方变体，单独存在时 YouTube 仍会返回
+      // LOGIN_REQUIRED；必须以 __Secure-1PSID / SID / LOGIN_INFO 这些「第一方会话」Cookie 为准。
+      const hasSecure1PSID = cookies.has("__Secure-1PSID");
+
+      if (cookies.size === 0) {
+        return { ok: false, reason: "文件为空或不是有效的 cookies.txt", missing: CRITICAL, expired: [], total: 0 };
+      }
+      if (expired.length > 0) {
+        return { ok: false, reason: `登录 Cookie 已过期：${expired.join("、")}`, missing, expired, total: cookies.size };
+      }
+      if (hasLoginInfo || hasSidTrio || hasSecure1PSID) {
+        return { ok: true, reason: `登录态有效（关键 Cookie ${present.length}/${CRITICAL.length} 项）`, missing, expired, total: cookies.size };
+      }
+      return { ok: false, reason: `缺少登录 Cookie：${missing.join("、")}，YouTube 会返回 LOGIN_REQUIRED`, missing, expired, total: cookies.size };
+    } catch (e) {
+      return { ok: false, reason: "读取 cookies 文件失败：" + e.message, missing: [], expired: [], total: 0 };
+    }
+  }
+
   ipcMain.handle("select-cookies-file", async () => {
     const r = await dialog.showOpenDialog(mainWindow, {
       title: "选择 cookies.txt",
       filters: [{ name: "Cookies", extensions: ["txt"] }],
       properties: ["openFile"],
     });
-    return { path: r.canceled ? null : r.filePaths[0] };
+    if (r.canceled) return { path: null, check: null };
+    const fp = r.filePaths[0];
+    return { path: fp, check: validateCookiesFile(fp) };
   });
 
   // 本地文件列表
@@ -573,9 +593,6 @@ function setupIPC() {
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   engine = new YtDlpEngine(ytDlpPath);
-  btchEngine = new BtchEngine();
-  biliEngine = new BilibiliEngine();
-  pwEngine = new PlaywrightEngine();
   fs.mkdirSync(store.getSettings().downloadPath, { recursive: true });
   setupIPC();
   // 启动 PO Token 服务（YouTube 高清下载必需；已运行则跳过）
@@ -592,7 +609,6 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 app.on("before-quit", () => {
-  if (pwEngine) pwEngine.close?.();
   if (potServerProcess) {
     try {
       potServerProcess.kill();

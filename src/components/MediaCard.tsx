@@ -36,7 +36,7 @@ export function MediaCard({
         isActive ? "border-[#5577ff] ring-2 ring-[#5577ff]/15" : "border-white/[0.07] hover:border-white/[0.16]",
       )}
     >
-      <div className="relative h-full w-[238px] shrink-0 overflow-hidden bg-black">
+      <div className="relative h-full w-[140px] shrink-0 overflow-hidden bg-black sm:w-[238px]">
         {media.thumbnail && (
           <img
             src={media.thumbnail}
@@ -54,7 +54,7 @@ export function MediaCard({
           </span>
         )}
       </div>
-      <div className="flex min-w-0 flex-1 flex-col justify-between p-4">
+      <div className="flex min-w-0 flex-1 flex-col justify-between p-3 sm:p-4">
         <div>
           <h3 className="truncate text-[14px] font-semibold leading-5" title={media.fileName}>
             {media.fileName?.replace(/\.(mp4|mkv|webm|flv)$/i, "") || "未命名视频"}
@@ -66,8 +66,8 @@ export function MediaCard({
               : ""}
           </p>
         </div>
-        <div className="flex items-end gap-2">
-          <div className="flex flex-1 flex-wrap gap-1.5">
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 sm:gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             {fmts.slice(0, 3).map((f: any, j: number) => (
               <button
                 key={f.id}
@@ -89,25 +89,23 @@ export function MediaCard({
             ))}
           </div>
           {isQueued ? (
-            <Button size="sm" disabled className="h-8 rounded-[9px] bg-emerald-500/15 px-3 text-xs text-emerald-300">
+            <Button size="sm" disabled className="ml-auto h-8 rounded-[9px] bg-emerald-500/15 px-3 text-xs text-emerald-300">
               <CheckCircle2 className="h-3.5 w-3.5" />
               已加入队列
             </Button>
           ) : (
-            <div className="flex shrink-0 items-center gap-2">
-              {!media._bvid && (
-                <Button
-                  size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onAddAudioToQueue(media, selectedFormat);
-                  }}
-                  className="h-8 rounded-[9px] bg-orange-500/18 px-3 text-xs text-orange-300 hover:bg-orange-500/28"
-                >
-                  <Music className="h-3.5 w-3.5" />
-                  提取音频
-                </Button>
-              )}
+            <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
+              <Button
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAddAudioToQueue(media, selectedFormat);
+                }}
+                className="h-8 rounded-[9px] bg-orange-500/18 px-3 text-xs text-orange-300 hover:bg-orange-500/28"
+              >
+                <Music className="h-3.5 w-3.5" />
+                提取音频
+              </Button>
               <Button
                 size="sm"
                 onClick={(e) => {
