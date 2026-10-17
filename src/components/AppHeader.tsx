@@ -1,5 +1,7 @@
-import { Calendar, Clock, Download, Minus, Settings, Square, X } from "lucide-react";
+import { BookOpen, Calendar, Clock, Download, Minus, Settings, Square, X } from "lucide-react";
 import { Button } from "./ui/button";
+
+const TUTORIAL_URL = "https://ucn41hpd0gi6.feishu.cn/wiki/ZWj4w4baTiVM1ik0ZWSch2DnnJb";
 
 interface AppHeaderProps {
   onOpenHistory: () => void;
@@ -16,6 +18,13 @@ export function AppHeader({ onOpenHistory, onOpenSettings, activated, expiresAt 
           <Download className="h-4 w-4" />
         </div>
         <p className="text-[13px] font-bold leading-none text-[#7184a5]">视频下载器</p>
+        <button
+          onClick={() => (window as any).electronAPI?.openExternal(TUTORIAL_URL)}
+          className="no-drag flex h-6 items-center gap-1 rounded-md px-2 text-[11px] font-medium text-[#6f8cff] transition-colors hover:bg-white/[0.06] hover:text-[#8fa6ff]"
+        >
+          <BookOpen className="h-3 w-3" />
+          使用教程
+        </button>
         {activated && expiresAt && (
           <span className="flex items-center gap-1 rounded-full border border-emerald-400/20 bg-emerald-400/8 px-2 py-0.5 text-[10px] text-emerald-300">
             <Calendar className="h-2.5 w-2.5" />

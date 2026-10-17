@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   deleteFile: (fp) => ipcRenderer.invoke("delete-file", fp),
   openFile: (fp) => ipcRenderer.invoke("open-file", fp),
   openFolder: () => ipcRenderer.invoke("open-folder"),
+  openExternal: (url) => ipcRenderer.invoke("open-external", url),
   selectCookiesFile: () => ipcRenderer.invoke("select-cookies-file"),
   listLocalFiles: () => ipcRenderer.invoke("list-local-files"),
   fileExists: (name) => ipcRenderer.invoke("file-exists", name),

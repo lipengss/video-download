@@ -456,6 +456,11 @@ function setupIPC() {
   ipcMain.handle("open-folder", () => {
     shell.openPath(store.getSettings().downloadPath);
   });
+  ipcMain.handle("open-external", (e, url) => {
+    // 只允许打开 http/https 链接，避免被用来打开任意 scheme
+    if (typeof url === "string" && /^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { ok: true };
+  });
   /** 校验 cookies.txt：检查是否包含 YouTube 登录所需的会话 Cookie */
   function validateCookiesFile(fp) {
     const CRITICAL = [
