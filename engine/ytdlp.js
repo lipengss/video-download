@@ -99,7 +99,7 @@ class YtDlpEngine {
           resolve({
             success: true,
             engine: "yt-dlp",
-            title: info.title || "",
+            title: this._title(info),
             thumbnail: info.thumbnail || (info.thumbnails && info.thumbnails[0]?.url) || "",
             duration: info.duration || 0,
             width: info.width || 0,
@@ -258,9 +258,23 @@ class YtDlpEngine {
     return `web_safari.gvs+${t}`;
   }
 
+  /**
+   * 取一个「有信息量」的标题。
+   * Instagram 等平台的 title 是 "Video by xxx" / "Photo by xxx" 这类通用占位标题，
+   * 真正的标题/文案在 description 里；此时回退用 description 作标题。
+   */
+  _title(info) {
+    const t = (info.title || "").trim();
+    if (!t || /^(video|photo|reel|post)\s+by\s+/i.test(t)) {
+      const desc = (info.description || "").replace(/\s+/g, " ").trim();
+      if (desc) return desc.slice(0, 80);
+    }
+    return t;
+  }
+
   _fileName(info) {
     const ext = info.ext || "mp4";
-    const title = (info.title || "video").replace(/[<>:"/\\|?*]/g, "_").substring(0, 60);
+    const title = (this._title(info) || "video").replace(/[<>:"/\\|?*]/g, "_").substring(0, 60);
     return `${title}.${ext}`;
   }
 

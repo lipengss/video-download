@@ -11,23 +11,13 @@
   },
   {
     "name": "douyin",
-    "label": "抖音",
+    "label": "TikTok",
     "short": "抖音",
     "test": "douyin\\.com|v\\.douyin",
     "bg": "#170B1A",
     "icon": "抖音.svg",
     "cls": "text-white bg-white/10",
     "dot": "bg-white"
-  },
-  {
-    "name": "tiktok",
-    "label": "TikTok",
-    "short": "TK",
-    "test": "tiktok\\.com",
-    "bg": "#ee1d52",
-    "icon": "抖音.svg",
-    "cls": "text-rose-400 bg-rose-400/10",
-    "dot": "bg-rose-400"
   },
   {
     "name": "instagram",
@@ -75,7 +65,7 @@
     "short": "快手",
     "test": "kuaishou\\.com",
     "bg": "#ff4906",
-    "icon": "抖音.svg",
+    "icon": "kuaishou.svg",
     "cls": "text-orange-400 bg-orange-400/10",
     "dot": "bg-orange-400"
   }
