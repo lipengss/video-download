@@ -232,6 +232,7 @@ export function App() {
       const mUrl = m.url || "";
       const isDouyin = /douyin\.com|v\.douyin|tiktok\.com/i.test(mUrl);
       if (isDouyin && m.thumbnail && /^https?:\/\//i.test(m.thumbnail)) {
+        m.thumbnailUrl = m.thumbnail; // 保留原始地址，供「下载封面」使用
         const cached = await ipc.cacheThumbnail(m.thumbnail);
         if (cached.path) m.thumbnail = `file:///${cached.path.replace(/\\/g, "/")}`;
       }
@@ -318,6 +319,7 @@ export function App() {
       index: 0,
       title: m.fileName,
       originalUrl: m._parseUrl || m.url,
+      thumbnail: m.thumbnailUrl || m.thumbnail,
       extractAudio: !!taskRef.extractAudio,
       writeSubs,
       writeThumbnail: downloadThumbnail,

@@ -18,6 +18,8 @@ export interface Media {
   index: number;
   url: string;
   thumbnail: string;
+  /** 原始封面 http 地址（本地缓存为 file:// 之前），用于「下载封面」 */
+  thumbnailUrl?: string;
   fileName: string;
   type: "video" | "image" | "unknown";
   width: number;

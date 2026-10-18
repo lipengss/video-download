@@ -10,6 +10,7 @@ const http = require("http");
 const { spawn } = require("child_process");
 const os = require("os");
 const { YtDlpEngine } = require("./engine/ytdlp");
+const { DouyinEngine } = require("./engine/douyin");
 const { Storage } = require("./main/storage");
 const { validateCode } = require("./main/activation");
 const platforms = require("./shared/platforms.json");
@@ -62,6 +63,7 @@ function isViteRunning(port) {
 
 let mainWindow = null;
 let engine = null;
+let douyinEngine = null;
 let activeDownloads = new Map(); // track active download processes for cancellation
 let currentCancelled = false; // 当前下载是否已被用户取消（取消时不再上报错误）
 let currentFilePath = null; // 当前下载的目标文件，取消时清理
@@ -129,6 +131,42 @@ function sanitizeFileName(name) {
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
     .trim()
     .slice(0, 120);
+}
+
+/** 下载封面到指定路径（失败不阻断主流程，返回写入路径或 null） */
+function downloadCover(url, filePath) {
+  return new Promise((resolve) => {
+    if (!url || !/^https?:\/\//i.test(url)) return resolve(null);
+    const ref = /tiktok/i.test(url) ? "https://www.tiktok.com/" : "https://www.douyin.com/";
+    const mod = url.startsWith("https") ? https : http;
+    const UA =
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+    const doFetch = (u, redirects) => {
+      if (redirects > 5) return resolve(null);
+      const req = mod.get(u, { headers: { Referer: ref, "User-Agent": UA } }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume();
+          doFetch(new URL(res.headers.location, u).toString(), redirects + 1);
+          return;
+        }
+        if (res.statusCode !== 200) {
+          res.resume();
+          return resolve(null);
+        }
+        const ws = fs.createWriteStream(filePath);
+        res.pipe(ws);
+        ws.on("finish", () => resolve(filePath));
+        ws.on("error", () => resolve(null));
+        res.on("error", () => resolve(null));
+      });
+      req.on("error", () => resolve(null));
+      req.setTimeout(15000, () => {
+        req.destroy();
+        resolve(null);
+      });
+    };
+    doFetch(url, 0);
+  });
 }
 
 // ─── 窗口 ────────────────────────────────────────────────
@@ -325,6 +363,22 @@ function setupIPC() {
     const pf = PLATFORM_REGEX.find((p) => p.test.test(url));
     console.log(`[parse-url] 开始 ${pf?.label || "未知平台"} · ${String(url).slice(0, 60)}`);
 
+    // 抖音：走 Playwright 引擎（yt-dlp 的 a_bogus 未实现，无法解析）
+    if (pf?.name === "douyin") {
+      if (!douyinEngine || !douyinEngine.isAvailable()) {
+        return { error: "抖音解析引擎不可用（缺少 playwright-core 依赖）" };
+      }
+      const t0 = Date.now();
+      try {
+        const r = await douyinEngine.parse(url, opts || {});
+        console.log(`[parse-url] douyin 成功 · ${Date.now() - t0}ms`);
+        return r;
+      } catch (err) {
+        console.log(`[parse-url] douyin 失败 · ${err.message}`);
+        return { error: err.message };
+      }
+    }
+
     if (!engine || !engine.isAvailable()) return { error: "yt-dlp 引擎不可用" };
 
     const t0 = Date.now();
@@ -342,6 +396,7 @@ function setupIPC() {
   ipcMain.handle("cancel-download", () => {
     currentCancelled = true;
     if (engine) engine.cancel();
+    if (douyinEngine) douyinEngine.cancel();
     return { ok: true };
   });
 
@@ -349,9 +404,13 @@ function setupIPC() {
     "start-download",
     async (
       event,
-      { url, formatId, index, title, cookiesBrowser, cookiesFile, proxy, originalUrl, writeSubs, subLang, extractAudio, poToken, writeThumbnail },
+      { url, formatId, index, title, cookiesBrowser, cookiesFile, proxy, originalUrl, writeSubs, subLang, extractAudio, poToken, writeThumbnail, thumbnail },
     ) => {
       const settings = store.getSettings();
+
+      // 抖音走独立引擎（Playwright 解析直链，formatId 即直链）
+      const pf = PLATFORM_REGEX.find((p) => p.test.test(originalUrl || url));
+      const isDouyin = pf?.name === "douyin";
 
       // 激活码校验（防御层；价格开关关闭时跳过）
       if (PRICE_ENABLED && !settings.activated) {
@@ -361,7 +420,7 @@ function setupIPC() {
       fs.mkdirSync(settings.downloadPath, { recursive: true });
 
       const ts = Date.now();
-      const ext = extractAudio ? ".mp3" : ".mp4";
+      const ext = !isDouyin && extractAudio ? ".mp3" : ".mp4";
       // 文件名优先使用解析出的视频标题，非法字符已清洗；无标题时回退时间戳
       const base = sanitizeFileName(title) || `video_${ts}`;
       let fileName = `${base}${ext}`;
@@ -381,17 +440,25 @@ function setupIPC() {
       currentFilePath = filePath;
 
       try {
-        await engine.download(url, formatId, filePath, (p) => send("download-progress", p), {
-          cookiesBrowser,
-          cookiesFile,
-          proxy,
-          ffmpegPath,
-          writeSubs,
-          subLang,
-          extractAudio,
-          poToken,
-          writeThumbnail,
-        });
+        if (isDouyin) {
+          await douyinEngine.download(url, formatId, filePath, (p) => send("download-progress", p), {});
+          // 下载封面（与视频同名 .jpg），失败不阻断
+          if (writeThumbnail) {
+            await downloadCover(thumbnail, filePath.replace(/\.mp4$/i, ".jpg"));
+          }
+        } else {
+          await engine.download(url, formatId, filePath, (p) => send("download-progress", p), {
+            cookiesBrowser,
+            cookiesFile,
+            proxy,
+            ffmpegPath,
+            writeSubs,
+            subLang,
+            extractAudio,
+            poToken,
+            writeThumbnail,
+          });
+        }
         const size = fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
         send("download-complete", { filePath, size, originalUrl });
         return { success: true, filePath, size };
@@ -599,6 +666,7 @@ function setupIPC() {
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   engine = new YtDlpEngine(ytDlpPath);
+  douyinEngine = new DouyinEngine();
   fs.mkdirSync(store.getSettings().downloadPath, { recursive: true });
   setupIPC();
   // 启动 PO Token 服务（YouTube 高清下载必需；已运行则跳过）
@@ -621,4 +689,5 @@ app.on("before-quit", () => {
     } catch {}
     potServerProcess = null;
   }
+  if (douyinEngine) douyinEngine.close().catch(() => {});
 });
