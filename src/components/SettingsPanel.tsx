@@ -1,4 +1,4 @@
-import { Captions, FolderOpen, Globe, Key, Settings, X } from "lucide-react";
+import { Captions, FolderOpen, Globe, Image, Key, Settings, X } from "lucide-react";
 import { OverlayScrollbarsComponent } from "overlayscrollbars-react";
 import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
@@ -13,6 +13,7 @@ interface SettingsPanelProps {
   useProxy: boolean;
   proxyUrl: string;
   writeSubs: boolean;
+  downloadThumbnail: boolean;
   poToken: string;
   potStatus: { running: boolean; version?: string | null } | null;
   onStartPot: () => void;
@@ -22,6 +23,7 @@ interface SettingsPanelProps {
   onUseProxyChange: (use: boolean) => void;
   onProxyUrlChange: (url: string) => void;
   onWriteSubsChange: (v: boolean) => void;
+  onDownloadThumbnailChange: (v: boolean) => void;
   onPoTokenChange: (v: string) => void;
   onSave: () => void;
   onSelectDir: () => Promise<{ path: string | null }>;
@@ -37,6 +39,7 @@ export function SettingsPanel({
   useProxy,
   proxyUrl,
   writeSubs,
+  downloadThumbnail,
   poToken,
   potStatus,
   onStartPot,
@@ -46,6 +49,7 @@ export function SettingsPanel({
   onUseProxyChange,
   onProxyUrlChange,
   onWriteSubsChange,
+  onDownloadThumbnailChange,
   onPoTokenChange,
   onSave,
   onSelectDir,
@@ -125,6 +129,26 @@ export function SettingsPanel({
                   className={cn(
                     "absolute top-1 h-4 w-4 rounded-full bg-white transition",
                     writeSubs ? "left-6" : "left-1",
+                  )}
+                />
+              </button>
+            </div>
+          </div>
+          <p className="mb-3 text-[11px] font-bold uppercase tracking-[1.6px] text-[#627895]">封面</p>
+          <div className="mb-6 space-y-2 rounded-[12px] bg-[#172236] px-3 py-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Image className="h-4 w-4 text-[#8ea0bd]" />
+                <span className="text-xs">同时下载封面</span>
+              </div>
+              <button
+                onClick={() => onDownloadThumbnailChange(!downloadThumbnail)}
+                className={cn("relative h-6 w-11 rounded-full", downloadThumbnail ? "bg-[#4e73ff]" : "bg-[#2a3952]")}
+              >
+                <span
+                  className={cn(
+                    "absolute top-1 h-4 w-4 rounded-full bg-white transition",
+                    downloadThumbnail ? "left-6" : "left-1",
                   )}
                 />
               </button>

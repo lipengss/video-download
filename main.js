@@ -349,7 +349,7 @@ function setupIPC() {
     "start-download",
     async (
       event,
-      { url, formatId, index, title, cookiesBrowser, cookiesFile, proxy, originalUrl, writeSubs, subLang, extractAudio, poToken },
+      { url, formatId, index, title, cookiesBrowser, cookiesFile, proxy, originalUrl, writeSubs, subLang, extractAudio, poToken, writeThumbnail },
     ) => {
       const settings = store.getSettings();
 
@@ -390,6 +390,7 @@ function setupIPC() {
           subLang,
           extractAudio,
           poToken,
+          writeThumbnail,
         });
         const size = fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
         send("download-complete", { filePath, size, originalUrl });

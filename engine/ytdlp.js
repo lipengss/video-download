@@ -168,6 +168,10 @@ class YtDlpEngine {
         // 下载独立字幕文件（不嵌入视频）
         args.push("--write-subs", "--write-auto-subs", "--sub-lang", opts.subLang || "zh-Hans,en");
       }
+      if (opts.writeThumbnail) {
+        // 下载视频封面（webp 等由 ffmpeg 统一转成 jpg），保存为视频同名的 .jpg
+        args.push("--write-thumbnail", "--convert-thumbnails", "jpg");
+      }
       args.push(url);
 
       const yt = spawn(this.binaryPath, args, {

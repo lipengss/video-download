@@ -143,6 +143,8 @@ export interface AppSettings {
   writeSubs?: boolean;
   /** 字幕语言，默认 "zh-Hans,en" */
   subLang?: string;
+  /** true = 同时下载视频封面（jpg） */
+  downloadThumbnail?: boolean;
   /** YouTube PO Token（Proof of Origin），高清下载必需，格式 web.gvs+… */
   poToken?: string;
 }

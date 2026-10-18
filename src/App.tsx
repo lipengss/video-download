@@ -37,6 +37,7 @@ export function App() {
   const [useProxy, setUseProxy] = useState(false);
   const [proxyUrl, setProxyUrl] = useState("");
   const [writeSubs, setWriteSubs] = useState(false);
+  const [downloadThumbnail, setDownloadThumbnail] = useState(false);
   const [poToken, setPoToken] = useState("");
   const [potStatus, setPotStatus] = useState<{ running: boolean; version?: string | null } | null>(null);
   const [previewVideo, setPreviewVideo] = useState<{ path: string; name: string } | null>(null);
@@ -73,6 +74,7 @@ export function App() {
       if (typeof s.useProxy === "boolean") setUseProxy(s.useProxy);
       if (s.proxyUrl) setProxyUrl(s.proxyUrl);
       if (typeof s.writeSubs === "boolean") setWriteSubs(s.writeSubs);
+      if (typeof s.downloadThumbnail === "boolean") setDownloadThumbnail(s.downloadThumbnail);
       if (s.poToken) setPoToken(s.poToken);
       if (s.activated) setActivated(true);
       if (s.activatedExpiresAt) setExpiresAt(s.activatedExpiresAt);
@@ -318,6 +320,7 @@ export function App() {
       originalUrl: m._parseUrl || m.url,
       extractAudio: !!taskRef.extractAudio,
       writeSubs,
+      writeThumbnail: downloadThumbnail,
       ...opts,
     });
   };
@@ -370,7 +373,7 @@ export function App() {
   };
 
   const saveSettings = () => {
-    ipc.saveSettings({ downloadPath: dlPath, defaultQuality, useProxy, proxyUrl, cookies: cookiesMap, writeSubs, poToken });
+    ipc.saveSettings({ downloadPath: dlPath, defaultQuality, useProxy, proxyUrl, cookies: cookiesMap, writeSubs, downloadThumbnail, poToken });
     setShowSettings(false);
     showToast("设置已保存", "success");
   };
@@ -393,7 +396,7 @@ export function App() {
     if (!r.path) return;
     const next = { ...cookiesMap, [name]: r.path };
     setCookiesMap(next);
-    await ipc.saveSettings({ downloadPath: dlPath, defaultQuality, useProxy, proxyUrl, cookies: next, poToken });
+    await ipc.saveSettings({ downloadPath: dlPath, defaultQuality, useProxy, proxyUrl, cookies: next, writeSubs, downloadThumbnail, poToken });
 
     const check = r.check;
     if (name === "youtube" && check && !check.ok) {
@@ -527,6 +530,7 @@ export function App() {
         useProxy={useProxy}
         proxyUrl={proxyUrl}
         writeSubs={writeSubs}
+        downloadThumbnail={downloadThumbnail}
         poToken={poToken}
         potStatus={potStatus}
         onStartPot={startPot}
@@ -536,6 +540,7 @@ export function App() {
         onUseProxyChange={setUseProxy}
         onProxyUrlChange={setProxyUrl}
         onWriteSubsChange={setWriteSubs}
+        onDownloadThumbnailChange={setDownloadThumbnail}
         onPoTokenChange={setPoToken}
         onSave={saveSettings}
         onSelectDir={async () => ipc.selectDir()}
