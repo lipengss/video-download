@@ -227,11 +227,11 @@ export function App() {
 
     refreshAll();
 
-    // 只对抖音/TikTok 缓存缩略图到本地（防盗链），其他平台直接用原始 URL
+    // 只对抖音/TikTok/快手 缓存缩略图到本地（防盗链），其他平台直接用原始 URL
     for (const m of all) {
       const mUrl = m.url || "";
-      const isDouyin = /douyin\.com|v\.douyin|tiktok\.com/i.test(mUrl);
-      if (isDouyin && m.thumbnail && /^https?:\/\//i.test(m.thumbnail)) {
+      const isHotlink = /douyin\.com|v\.douyin|tiktok\.com|kuaishou\.com/i.test(mUrl);
+      if (isHotlink && m.thumbnail && /^https?:\/\//i.test(m.thumbnail)) {
         m.thumbnailUrl = m.thumbnail; // 保留原始地址，供「下载封面」使用
         const cached = await ipc.cacheThumbnail(m.thumbnail);
         if (cached.path) m.thumbnail = `file:///${cached.path.replace(/\\/g, "/")}`;

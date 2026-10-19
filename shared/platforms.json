@@ -11,7 +11,7 @@
   },
   {
     "name": "douyin",
-    "label": "TikTok",
+    "label": "抖音",
     "short": "抖音",
     "test": "douyin\\.com|v\\.douyin",
     "bg": "#170B1A",
@@ -20,9 +20,19 @@
     "dot": "bg-white"
   },
   {
+    "name": "tiktok",
+    "label": "TikTok",
+    "short": "TikTok",
+    "test": "tiktok\\.com",
+    "bg": "#170B1A",
+    "icon": "抖音.svg",
+    "cls": "text-rose-400 bg-rose-400/10",
+    "dot": "bg-rose-400"
+  },
+  {
     "name": "instagram",
     "label": "Instagram",
-    "short": "IG",
+    "short": "Instagram",
     "test": "instagram\\.com",
     "bg": "linear-gradient(135deg,#f09433,#e6683c,#dc2743,#cc2366,#833ab4)",
     "icon": "instgram.svg",
@@ -32,7 +42,7 @@
   {
     "name": "youtube",
     "label": "YouTube",
-    "short": "YT",
+    "short": "YouTube",
     "test": "youtube\\.com|youtu\\.be",
     "bg": "#d31616",
     "icon": "youtube.svg",
@@ -52,7 +62,7 @@
   {
     "name": "facebook",
     "label": "Facebook",
-    "short": "FB",
+    "short": "Facebook",
     "test": "facebook\\.com|fb\\.watch",
     "bg": "#1877f2",
     "icon": "youtube.svg",

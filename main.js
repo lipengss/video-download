@@ -11,6 +11,7 @@ const { spawn } = require("child_process");
 const os = require("os");
 const { YtDlpEngine } = require("./engine/ytdlp");
 const { DouyinEngine } = require("./engine/douyin");
+const { KuaishouEngine } = require("./engine/kuaishou");
 const { Storage } = require("./main/storage");
 const { validateCode } = require("./main/activation");
 const platforms = require("./shared/platforms.json");
@@ -64,6 +65,7 @@ function isViteRunning(port) {
 let mainWindow = null;
 let engine = null;
 let douyinEngine = null;
+let kuaishouEngine = null;
 let activeDownloads = new Map(); // track active download processes for cancellation
 let currentCancelled = false; // 当前下载是否已被用户取消（取消时不再上报错误）
 let currentFilePath = null; // 当前下载的目标文件，取消时清理
@@ -137,7 +139,11 @@ function sanitizeFileName(name) {
 function downloadCover(url, filePath) {
   return new Promise((resolve) => {
     if (!url || !/^https?:\/\//i.test(url)) return resolve(null);
-    const ref = /tiktok/i.test(url) ? "https://www.tiktok.com/" : "https://www.douyin.com/";
+    const ref = /tiktok/i.test(url)
+      ? "https://www.tiktok.com/"
+      : /kuaishou|yximgs|kwaicdn/i.test(url)
+        ? "https://www.kuaishou.com/"
+        : "https://www.douyin.com/";
     const mod = url.startsWith("https") ? https : http;
     const UA =
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -379,6 +385,22 @@ function setupIPC() {
       }
     }
 
+    // 快手：走纯 HTTP 移动页解析引擎（yt-dlp 已移除快手提取器，无法解析）
+    if (pf?.name === "kuaishou") {
+      if (!kuaishouEngine || !kuaishouEngine.isAvailable()) {
+        return { error: "快手解析引擎不可用" };
+      }
+      const t0 = Date.now();
+      try {
+        const r = await kuaishouEngine.parse(url, opts || {});
+        console.log(`[parse-url] kuaishou 成功 · ${Date.now() - t0}ms`);
+        return r;
+      } catch (err) {
+        console.log(`[parse-url] kuaishou 失败 · ${err.message}`);
+        return { error: err.message };
+      }
+    }
+
     if (!engine || !engine.isAvailable()) return { error: "yt-dlp 引擎不可用" };
 
     const t0 = Date.now();
@@ -397,6 +419,7 @@ function setupIPC() {
     currentCancelled = true;
     if (engine) engine.cancel();
     if (douyinEngine) douyinEngine.cancel();
+    if (kuaishouEngine) kuaishouEngine.cancel();
     return { ok: true };
   });
 
@@ -408,9 +431,10 @@ function setupIPC() {
     ) => {
       const settings = store.getSettings();
 
-      // 抖音走独立引擎（Playwright 解析直链，formatId 即直链）
+      // 抖音/快手走独立引擎（Playwright 解析直链，formatId 即直链）
       const pf = PLATFORM_REGEX.find((p) => p.test.test(originalUrl || url));
       const isDouyin = pf?.name === "douyin";
+      const isKuaishou = pf?.name === "kuaishou";
 
       // 激活码校验（防御层；价格开关关闭时跳过）
       if (PRICE_ENABLED && !settings.activated) {
@@ -420,7 +444,7 @@ function setupIPC() {
       fs.mkdirSync(settings.downloadPath, { recursive: true });
 
       const ts = Date.now();
-      const ext = !isDouyin && extractAudio ? ".mp3" : ".mp4";
+      const ext = !isDouyin && !isKuaishou && extractAudio ? ".mp3" : ".mp4";
       // 文件名优先使用解析出的视频标题，非法字符已清洗；无标题时回退时间戳
       const base = sanitizeFileName(title) || `video_${ts}`;
       let fileName = `${base}${ext}`;
@@ -440,8 +464,9 @@ function setupIPC() {
       currentFilePath = filePath;
 
       try {
-        if (isDouyin) {
-          await douyinEngine.download(url, formatId, filePath, (p) => send("download-progress", p), {});
+        const pwEngine = isDouyin ? douyinEngine : isKuaishou ? kuaishouEngine : null;
+        if (pwEngine) {
+          await pwEngine.download(url, formatId, filePath, (p) => send("download-progress", p), {});
           // 下载封面（与视频同名 .jpg），失败不阻断
           if (writeThumbnail) {
             await downloadCover(thumbnail, filePath.replace(/\.mp4$/i, ".jpg"));
@@ -628,7 +653,11 @@ function setupIPC() {
     if (fs.existsSync(cachePath)) return { path: cachePath };
 
     // 根据域名自动匹配 Referer
-    const ref = /tiktok/i.test(imageUrl) ? "https://www.tiktok.com/" : "https://www.douyin.com/";
+    const ref = /tiktok/i.test(imageUrl)
+      ? "https://www.tiktok.com/"
+      : /kuaishou|yximgs|kwaicdn/i.test(imageUrl)
+        ? "https://www.kuaishou.com/"
+        : "https://www.douyin.com/";
 
     const doFetch = (url) =>
       new Promise((resolve, reject) => {
@@ -667,6 +696,7 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   engine = new YtDlpEngine(ytDlpPath);
   douyinEngine = new DouyinEngine();
+  kuaishouEngine = new KuaishouEngine();
   fs.mkdirSync(store.getSettings().downloadPath, { recursive: true });
   setupIPC();
   // 启动 PO Token 服务（YouTube 高清下载必需；已运行则跳过）
@@ -690,4 +720,5 @@ app.on("before-quit", () => {
     potServerProcess = null;
   }
   if (douyinEngine) douyinEngine.close().catch(() => {});
+  if (kuaishouEngine) kuaishouEngine.close().catch(() => {});
 });

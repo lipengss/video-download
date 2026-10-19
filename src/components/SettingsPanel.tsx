@@ -154,7 +154,7 @@ export function SettingsPanel({
               </button>
             </div>
           </div>
-          <p className="mb-3 text-[11px] font-bold uppercase tracking-[1.6px] text-[#627895]">Cookies 管理</p>
+          <p className="mb-3 text-[11px] font-bold tracking-[1.6px] text-[#627895]">Cookies 管理</p>
           <div className="mb-6 space-y-2">
             {PLATFORMS.map((p) => (
               <div key={p.name} className="flex items-center justify-between rounded-[12px] bg-[#172236] px-3 py-2.5">
@@ -162,7 +162,7 @@ export function SettingsPanel({
                   <span className="flex h-7 w-7 items-center justify-center rounded-full" style={{ background: p.bg }}>
                     <img src={p.icon} className="h-4 w-4" referrerPolicy="no-referrer" />
                   </span>
-                  <span className="text-xs">{p.short}</span>
+                  <span className="text-xs">{p.label}</span>
                 </div>
                 {cookiesMap[p.name] ? (
                   <button
@@ -236,24 +236,27 @@ export function SettingsPanel({
               自动获取 PO Token，解决 YouTube 高清下载 403 报错。
             </p>
           </div>
-          <p className="mb-3 text-[11px] font-bold uppercase tracking-[1.6px] text-[#627895]">PO Token（高级）</p>
-          <div className="space-y-2 rounded-[12px] bg-[#172236] px-3 py-3">
-            <div className="flex items-center gap-2">
-              <Key className="h-4 w-4 text-[#8ea0bd]" />
-              <span className="text-xs">YouTube PO Token</span>
-            </div>
-            <input
-              value={poToken}
-              onChange={(e) => onPoTokenChange(e.target.value)}
-              placeholder="web.gvs+…（可选）"
-              className="h-9 w-full rounded-[10px] border border-white/[0.08] bg-[#1d2a40] px-3 text-xs outline-none"
-            />
-            <p className="text-[11px] leading-relaxed text-[#627895]">
-              YouTube 高清下载需 PO Token，否则会 403 报错。推荐运行
-              <span className="text-[#9fb3d6]"> bgutil-ytdlp-pot-provider </span>
-              自动获取；也可手动粘贴完整 token。
-            </p>
-          </div>
+          {!potStatus?.running && (
+            <>
+              <p className="mb-3 text-[11px] font-bold uppercase tracking-[1.6px] text-[#627895]">PO Token（高级）</p>
+              <div className="space-y-2 rounded-[12px] bg-[#172236] px-3 py-3">
+                <div className="flex items-center gap-2">
+                  <Key className="h-4 w-4 text-[#8ea0bd]" />
+                  <span className="text-xs">YouTube PO Token</span>
+                </div>
+                <input
+                  value={poToken}
+                  onChange={(e) => onPoTokenChange(e.target.value)}
+                  placeholder="web.gvs+…（可选）"
+                  className="h-9 w-full rounded-[10px] border border-white/[0.08] bg-[#1d2a40] px-3 text-xs outline-none"
+                />
+                <p className="text-[11px] leading-relaxed text-[#627895]">
+                  自动服务不可用时的兜底：手动粘贴完整 token（格式 web.gvs+…）。
+                  建议优先启动上方「PO Token 服务」自动获取。
+                </p>
+              </div>
+            </>
+          )}
         </OverlayScrollbarsComponent>
         <div className="border-t border-white/[0.07] p-5">
           <Button onClick={onSave} className="h-11 w-full rounded-[15px] bg-[#4e73ff]">
