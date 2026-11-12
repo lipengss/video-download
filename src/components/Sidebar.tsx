@@ -7,6 +7,7 @@ import type { QItem, HItem } from "../lib/types";
 import { QueuePanel } from "./QueuePanel";
 
 interface SidebarProps {
+  id?: string;
   tab: "queue" | "history";
   onTabChange: (tab: "queue" | "history") => void;
   queue: QItem[];
@@ -108,6 +109,7 @@ function HistoryTab({
 }
 
 export function Sidebar({
+  id,
   tab,
   onTabChange,
   queue,
@@ -125,7 +127,10 @@ export function Sidebar({
   onDeleteRecord,
 }: SidebarProps) {
   return (
-    <aside className="hidden w-[350px] shrink-0 flex-col overflow-hidden rounded-[10px] border border-white/[0.07] bg-[#111b2b] lg:flex">
+    <aside
+      id={id}
+      className="flex max-h-[min(44vh,380px)] w-full shrink-0 flex-col overflow-hidden rounded-xl border border-white/[0.07] bg-[#111b2b] md:max-h-none md:h-full md:w-[340px]"
+    >
       {/* Tab header + folder button — fixed height */}
       <div className="mb-4 flex shrink-0 items-center justify-between px-4 pt-4">
         <div className="flex rounded-[10px] bg-[#172236] p-1">

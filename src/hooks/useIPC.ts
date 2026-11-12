@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type {
   AppSettings,
   CookiesCheck,
@@ -13,7 +14,8 @@ import type {
 const api = (window as any).electronAPI;
 
 export function useIPC() {
-  return {
+  return useMemo(
+    () => ({
     getEngineInfo: () => (api?.getEngineInfo?.() ?? Promise.resolve({})) as Promise<EngineInfo>,
     parseUrl: (url: string, opts?: any) =>
       (api?.parseUrl?.(url, opts) ?? Promise.resolve({ error: "API not available" })) as Promise<ParseResult>,
@@ -52,8 +54,8 @@ export function useIPC() {
     deleteFile: (fp: string) => (api?.deleteFile?.(fp) ?? Promise.resolve({ ok: false })) as Promise<{ ok: boolean }>,
     openFile: (fp: string) => (api?.openFile?.(fp) ?? Promise.resolve({ ok: true })) as Promise<{ ok: boolean }>,
     openFolder: () => (api?.openFolder?.() ?? Promise.resolve({ ok: true })) as Promise<{ ok: boolean }>,
-    selectCookiesFile: () =>
-      (api?.selectCookiesFile?.() ?? Promise.resolve({ path: null, check: null })) as Promise<{
+    selectCookiesFile: (platform?: string) =>
+      (api?.selectCookiesFile?.(platform) ?? Promise.resolve({ path: null, check: null })) as Promise<{
         path: string | null;
         check: CookiesCheck | null;
       }>,
@@ -78,7 +80,9 @@ export function useIPC() {
         version?: string | null;
         error?: string;
       }>,
-  };
+  }),
+    [],
+  );
 }
 
 export type IPC = ReturnType<typeof useIPC>;

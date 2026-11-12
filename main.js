@@ -12,6 +12,7 @@ const os = require("os");
 const { YtDlpEngine } = require("./engine/ytdlp");
 const { DouyinEngine } = require("./engine/douyin");
 const { KuaishouEngine } = require("./engine/kuaishou");
+const { InstagramEngine } = require("./engine/instagram");
 const { Storage } = require("./main/storage");
 const { validateCode } = require("./main/activation");
 const platforms = require("./shared/platforms.json");
@@ -66,6 +67,7 @@ let mainWindow = null;
 let engine = null;
 let douyinEngine = null;
 let kuaishouEngine = null;
+let instagramEngine = null;
 let activeDownloads = new Map(); // track active download processes for cancellation
 let currentCancelled = false; // 当前下载是否已被用户取消（取消时不再上报错误）
 let currentFilePath = null; // 当前下载的目标文件，取消时清理
@@ -129,7 +131,7 @@ async function startPotServer() {
 function sanitizeFileName(name) {
   if (!name) return "";
   return String(name)
-    .replace(/\.(mp4|mkv|webm|flv|mov|m4a|mp3)$/i, "")
+    .replace(/\.(mp4|mkv|webm|flv|mov|m4a|mp3|jpe?g|png|webp|gif)$/i, "")
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
     .trim()
     .slice(0, 120);
@@ -385,6 +387,35 @@ function setupIPC() {
       }
     }
 
+    // Instagram 轮播图：yt-dlp 对纯图片会失败，走帖子页 JSON 解析
+    if (pf?.name === "instagram" && /instagram\.com\/(p|tv)\//i.test(url)) {
+      if (!instagramEngine || !instagramEngine.isAvailable()) {
+        return { error: "Instagram 解析引擎不可用" };
+      }
+      const t0 = Date.now();
+      try {
+        if (!instagramEngine.isAvailable()) {
+          return {
+            error:
+              "Instagram 轮播解析需要本机已安装 Edge 或 Chrome，并建议开启代理、导入 instagram cookies",
+          };
+        }
+        const igOpts = opts || {};
+        if (igOpts.cookiesFile) {
+          console.log(`[parse-url] instagram cookies · ${igOpts.cookiesFile}`);
+        } else {
+          console.log("[parse-url] instagram 未配置 cookies 文件");
+        }
+        if (igOpts.proxy) console.log(`[parse-url] instagram proxy · ${igOpts.proxy}`);
+        const r = await instagramEngine.parse(url, igOpts);
+        console.log(`[parse-url] instagram 成功 · ${r.media?.length || 0} 项 · ${Date.now() - t0}ms`);
+        return r;
+      } catch (err) {
+        console.log(`[parse-url] instagram 失败 · ${err.message}`);
+        return { error: err.message };
+      }
+    }
+
     // 快手：走纯 HTTP 移动页解析引擎（yt-dlp 已移除快手提取器，无法解析）
     if (pf?.name === "kuaishou") {
       if (!kuaishouEngine || !kuaishouEngine.isAvailable()) {
@@ -420,6 +451,7 @@ function setupIPC() {
     if (engine) engine.cancel();
     if (douyinEngine) douyinEngine.cancel();
     if (kuaishouEngine) kuaishouEngine.cancel();
+    if (instagramEngine) instagramEngine.cancel();
     return { ok: true };
   });
 
@@ -427,7 +459,23 @@ function setupIPC() {
     "start-download",
     async (
       event,
-      { url, formatId, index, title, cookiesBrowser, cookiesFile, proxy, originalUrl, writeSubs, subLang, extractAudio, poToken, writeThumbnail, thumbnail },
+      {
+        url,
+        formatId,
+        index,
+        title,
+        cookiesBrowser,
+        cookiesFile,
+        proxy,
+        originalUrl,
+        writeSubs,
+        subLang,
+        extractAudio,
+        poToken,
+        writeThumbnail,
+        thumbnail,
+        mediaType,
+      },
     ) => {
       const settings = store.getSettings();
 
@@ -435,6 +483,11 @@ function setupIPC() {
       const pf = PLATFORM_REGEX.find((p) => p.test.test(originalUrl || url));
       const isDouyin = pf?.name === "douyin";
       const isKuaishou = pf?.name === "kuaishou";
+      const isInstagramCdn =
+        pf?.name === "instagram" &&
+        formatId &&
+        /^https?:\/\//i.test(formatId) &&
+        /cdninstagram|fbcdn|instagram/i.test(formatId);
 
       // 激活码校验（防御层；价格开关关闭时跳过）
       if (PRICE_ENABLED && !settings.activated) {
@@ -444,7 +497,12 @@ function setupIPC() {
       fs.mkdirSync(settings.downloadPath, { recursive: true });
 
       const ts = Date.now();
-      const ext = !isDouyin && !isKuaishou && extractAudio ? ".mp3" : ".mp4";
+      let ext = ".mp4";
+      if (!isDouyin && !isKuaishou && extractAudio) ext = ".mp3";
+      else if (mediaType === "image") {
+        const fromTitle = (title || "").match(/\.(jpe?g|png|webp|gif)$/i);
+        ext = fromTitle ? fromTitle[0].toLowerCase() : ".jpg";
+      }
       // 文件名优先使用解析出的视频标题，非法字符已清洗；无标题时回退时间戳
       const base = sanitizeFileName(title) || `video_${ts}`;
       let fileName = `${base}${ext}`;
@@ -464,9 +522,17 @@ function setupIPC() {
       currentFilePath = filePath;
 
       try {
-        const pwEngine = isDouyin ? douyinEngine : isKuaishou ? kuaishouEngine : null;
+        const pwEngine = isDouyin
+          ? douyinEngine
+          : isKuaishou
+            ? kuaishouEngine
+            : isInstagramCdn
+              ? instagramEngine
+              : null;
         if (pwEngine) {
-          await pwEngine.download(url, formatId, filePath, (p) => send("download-progress", p), {});
+          await pwEngine.download(url, formatId, filePath, (p) => send("download-progress", p), {
+            cookiesFile,
+          });
           // 下载封面（与视频同名 .jpg），失败不阻断
           if (writeThumbnail) {
             await downloadCover(thumbnail, filePath.replace(/\.mp4$/i, ".jpg"));
@@ -482,6 +548,7 @@ function setupIPC() {
             extractAudio,
             poToken,
             writeThumbnail,
+            mediaType,
           });
         }
         const size = fs.existsSync(filePath) ? fs.statSync(filePath).size : 0;
@@ -554,6 +621,62 @@ function setupIPC() {
     if (typeof url === "string" && /^https?:\/\//i.test(url)) shell.openExternal(url);
     return { ok: true };
   });
+  /** Instagram cookies：sessionid + csrftoken 为登录关键项 */
+  function validateInstagramCookiesFile(fp) {
+    const CRITICAL = ["sessionid", "csrftoken"];
+    try {
+      const text = fs.readFileSync(fp, "utf8");
+      const cookies = new Map();
+      for (const raw of text.split(/\r?\n/)) {
+        const t = raw.trim();
+        if (!t || (t.startsWith("#") && !t.startsWith("#HttpOnly_"))) continue;
+        const parts = t.replace(/^#HttpOnly_/, "").split("\t");
+        if (parts.length < 7) continue;
+        const name = parts[5];
+        const domain = parts[0];
+        const expiry = parseInt(parts[4], 10) || 0;
+        if (!/instagram/i.test(domain) && !CRITICAL.includes(name)) continue;
+        cookies.set(name, { domain, expiry });
+      }
+      const now = Math.floor(Date.now() / 1000);
+      const missing = CRITICAL.filter((c) => !cookies.has(c));
+      const expired = CRITICAL.filter((c) => {
+        const ck = cookies.get(c);
+        return ck && ck.expiry > 0 && ck.expiry < now;
+      });
+      if (cookies.size === 0) {
+        return {
+          ok: false,
+          reason: "未找到 Instagram Cookie（需从 instagram.com 导出 Netscape cookies.txt）",
+          missing: CRITICAL,
+          expired: [],
+          total: 0,
+        };
+      }
+      if (expired.length) {
+        return { ok: false, reason: `Cookie 已过期：${expired.join("、")}，请重新登录导出`, missing, expired, total: cookies.size };
+      }
+      if (missing.length) {
+        return {
+          ok: false,
+          reason: `缺少 ${missing.join("、")}，请在浏览器登录 instagram.com 后重新导出`,
+          missing,
+          expired: [],
+          total: cookies.size,
+        };
+      }
+      return {
+        ok: true,
+        reason: `Instagram 登录态有效（共 ${cookies.size} 项）`,
+        missing: [],
+        expired: [],
+        total: cookies.size,
+      };
+    } catch (e) {
+      return { ok: false, reason: "读取 cookies 失败：" + e.message, missing: CRITICAL, expired: [], total: 0 };
+    }
+  }
+
   /** 校验 cookies.txt：检查是否包含 YouTube 登录所需的会话 Cookie */
   function validateCookiesFile(fp) {
     const CRITICAL = [
@@ -607,7 +730,7 @@ function setupIPC() {
     }
   }
 
-  ipcMain.handle("select-cookies-file", async () => {
+  ipcMain.handle("select-cookies-file", async (_e, platform) => {
     const r = await dialog.showOpenDialog(mainWindow, {
       title: "选择 cookies.txt",
       filters: [{ name: "Cookies", extensions: ["txt"] }],
@@ -615,7 +738,13 @@ function setupIPC() {
     });
     if (r.canceled) return { path: null, check: null };
     const fp = r.filePaths[0];
-    return { path: fp, check: validateCookiesFile(fp) };
+  const check =
+      platform === "instagram"
+        ? validateInstagramCookiesFile(fp)
+        : platform === "youtube"
+          ? validateCookiesFile(fp)
+          : { ok: true, reason: "已导入", missing: [], expired: [], total: 0 };
+    return { path: fp, check };
   });
 
   // 本地文件列表
@@ -697,6 +826,7 @@ app.whenReady().then(() => {
   engine = new YtDlpEngine(ytDlpPath);
   douyinEngine = new DouyinEngine();
   kuaishouEngine = new KuaishouEngine();
+  instagramEngine = new InstagramEngine();
   fs.mkdirSync(store.getSettings().downloadPath, { recursive: true });
   setupIPC();
   // 启动 PO Token 服务（YouTube 高清下载必需；已运行则跳过）
@@ -721,4 +851,5 @@ app.on("before-quit", () => {
   }
   if (douyinEngine) douyinEngine.close().catch(() => {});
   if (kuaishouEngine) kuaishouEngine.close().catch(() => {});
+  if (instagramEngine) instagramEngine.close().catch(() => {});
 });

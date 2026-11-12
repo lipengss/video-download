@@ -39,9 +39,23 @@ class YtDlpEngine {
 
   // ─── URL 解析 ────────────────────────────────────────
 
+  /** Instagram 帖子 / IGTV（可能为多图轮播）；Reel 等仍走单条解析 */
+  _isInstagramCarouselUrl(url) {
+    return /instagram\.com\/(p|tv)\//i.test(url || "");
+  }
+
   parse(url, opts = {}) {
+    // Instagram 多图轮播勿走 playlist：yt-dlp 对 GraphImage 会报 No video formats found
+    const allowPlaylist = false;
+    return this._runDumpJson(url, opts, allowPlaylist).then((info) =>
+      this._buildParseResponse(url, info),
+    );
+  }
+
+  _runDumpJson(url, opts = {}, allowPlaylist = false) {
     const rt = this._jsRuntime();
-    const args = ["--dump-json", "--no-playlist", ...rt.args];
+    const args = ["--dump-json", ...rt.args];
+    if (!allowPlaylist) args.push("--no-playlist");
     if (opts.cookiesBrowser) args.push("--cookies-from-browser", opts.cookiesBrowser);
     if (opts.cookiesFile) args.push("--cookies", opts.cookiesFile);
     if (opts.proxy) args.push("--proxy", opts.proxy);
@@ -54,7 +68,7 @@ class YtDlpEngine {
     return new Promise((resolve, reject) => {
       const yt = spawn(this.binaryPath, args, {
         stdio: ["ignore", "pipe", "pipe"],
-        timeout: 60000,
+        timeout: 90000,
         env: rt.env ? { ...process.env, ...rt.env } : process.env,
       });
 
@@ -68,66 +82,7 @@ class YtDlpEngine {
           return reject(new Error(stderr.split("\n").slice(-3).join(" ") || `退出码 ${code}`));
         }
         try {
-          const info = JSON.parse(stdout);
-          // 从格式列表中提取所有可用的视频格式（音频轨不应混入画质列表）
-          const formats = (info.formats || [])
-            .filter((f) => f.vcodec !== "none")
-            .map((f) => ({
-              id: f.format_id,
-              resolution: f.width && f.height ? `${f.width}×${f.height}` : f.format_note || "未知",
-              width: f.width || 0,
-              height: f.height || 0,
-              aspectRatio: this._calcAspectRatio(f.width, f.height),
-              quality: this._qualityLabel(f.width, f.height),
-              ext: f.ext,
-              filesize: f.filesize || 0,
-              filesizeFormatted: this._formatSize(f.filesize),
-              vcodec: f.vcodec,
-              acodec: f.acodec,
-            }))
-            .sort((a, b) => b.width * b.height + b.filesize / 1000000 - (a.width * a.height + a.filesize / 1000000));
-
-          // 去重（同分辨率保留最大的）
-          const seen = new Set();
-          const uniqueFormats = formats.filter((f) => {
-            const key = f.resolution;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-          });
-
-          resolve({
-            success: true,
-            engine: "yt-dlp",
-            title: this._title(info),
-            thumbnail: info.thumbnail || (info.thumbnails && info.thumbnails[0]?.url) || "",
-            duration: info.duration || 0,
-            width: info.width || 0,
-            height: info.height || 0,
-            aspectRatio: this._calcAspectRatio(info.width, info.height),
-            resolution: info.width && info.height ? `${info.width}×${info.height}` : "未知",
-            quality: this._qualityLabel(info.width, info.height),
-            formats: uniqueFormats,
-            bestFormatId: uniqueFormats.length > 0 ? uniqueFormats[0].id : null,
-            // 返回单个 media 项，兼容前端
-            media: [
-              {
-                index: 0,
-                url,
-                thumbnail: info.thumbnail || (info.thumbnails && info.thumbnails[0]?.url) || "",
-                fileName: this._fileName(info),
-                type: "video",
-                width: info.width || 0,
-                height: info.height || 0,
-                aspectRatio: this._calcAspectRatio(info.width, info.height),
-                resolution: info.width && info.height ? `${info.width}×${info.height}` : "未知",
-                quality: this._qualityLabel(info.width, info.height),
-                duration: info.duration || 0,
-                formats: uniqueFormats,
-                bestFormatId: uniqueFormats.length > 0 ? uniqueFormats[0].id : null,
-              },
-            ],
-          });
+          resolve(JSON.parse(stdout));
         } catch (e) {
           reject(new Error("解析失败: " + e.message));
         }
@@ -137,6 +92,147 @@ class YtDlpEngine {
     });
   }
 
+  _extractPlaylistEntries(info) {
+    if (info?._type === "playlist" && Array.isArray(info.entries)) {
+      return info.entries.filter(Boolean);
+    }
+    return [info];
+  }
+
+  _isImageEntry(info) {
+    const ext = String(info?.ext || "").toLowerCase();
+    if (/^(jpe?g|png|webp|gif)$/.test(ext)) return true;
+    const formats = info?.formats || [];
+    const hasVideo = formats.some((f) => f.vcodec && f.vcodec !== "none");
+    if (!hasVideo && info?.vcodec === "none") return true;
+    if (!hasVideo && !info?.duration && (info?.width || formats.length > 0)) return true;
+    return false;
+  }
+
+  _buildVideoFormats(info) {
+    const formats = (info.formats || [])
+      .filter((f) => f.vcodec !== "none")
+      .map((f) => ({
+        id: f.format_id,
+        resolution: f.width && f.height ? `${f.width}×${f.height}` : f.format_note || "未知",
+        width: f.width || 0,
+        height: f.height || 0,
+        aspectRatio: this._calcAspectRatio(f.width, f.height),
+        quality: this._qualityLabel(f.width, f.height),
+        ext: f.ext,
+        filesize: f.filesize || 0,
+        filesizeFormatted: this._formatSize(f.filesize),
+        vcodec: f.vcodec,
+        acodec: f.acodec,
+      }))
+      .sort((a, b) => b.width * b.height + b.filesize / 1000000 - (a.width * a.height + a.filesize / 1000000));
+
+    const seen = new Set();
+    return formats.filter((f) => {
+      const key = f.resolution;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  _buildImageFormats(info) {
+    const w = info.width || 0;
+    const h = info.height || 0;
+    const id =
+      info.format_id ||
+      (info.formats && info.formats[0] && info.formats[0].format_id) ||
+      "best";
+    return [
+      {
+        id: String(id),
+        resolution: w && h ? `${w}×${h}` : "原图",
+        width: w,
+        height: h,
+        aspectRatio: this._calcAspectRatio(w, h),
+        quality: w && h ? this._qualityLabel(w, h) : "原图",
+        ext: info.ext || "jpg",
+        filesize: info.filesize || 0,
+        filesizeFormatted: this._formatSize(info.filesize),
+        vcodec: "none",
+        acodec: "none",
+      },
+    ];
+  }
+
+  _mediaDownloadUrl(entry, pageUrl) {
+    const u = entry?.url || entry?.webpage_url;
+    if (u && /^https?:\/\//i.test(u)) return u;
+    return pageUrl;
+  }
+
+  _fileNameForEntry(info, index, total, fallbackTitle) {
+    const isImage = this._isImageEntry(info);
+    const ext = info.ext || (isImage ? "jpg" : "mp4");
+    const base = (this._title(info) || fallbackTitle || "media")
+      .replace(/[<>:"/\\|?*]/g, "_")
+      .substring(0, 52);
+    const suffix = total > 1 ? `_${index + 1}` : "";
+    return `${base}${suffix}.${ext}`;
+  }
+
+  _mediaFromEntry(entry, pageUrl, index, total, playlistThumb) {
+    const isImage = this._isImageEntry(entry);
+    const formats = isImage ? this._buildImageFormats(entry) : this._buildVideoFormats(entry);
+    const w = entry.width || 0;
+    const h = entry.height || 0;
+    const thumb =
+      entry.thumbnail ||
+      (entry.thumbnails && entry.thumbnails[0]?.url) ||
+      playlistThumb ||
+      "";
+    return {
+      index,
+      url: this._mediaDownloadUrl(entry, pageUrl),
+      thumbnail: thumb,
+      fileName: this._fileNameForEntry(entry, index, total, this._title(entry)),
+      type: isImage ? "image" : "video",
+      width: w,
+      height: h,
+      aspectRatio: this._calcAspectRatio(w, h),
+      resolution: w && h ? `${w}×${h}` : isImage ? "图片" : "未知",
+      quality: isImage ? (w && h ? this._qualityLabel(w, h) : "原图") : this._qualityLabel(w, h),
+      duration: entry.duration || 0,
+      formats,
+      bestFormatId: formats.length > 0 ? formats[0].id : isImage ? "best" : null,
+      /** 轮播分组：同一帖子下的多条 media 共享 */
+      carouselId: total > 1 ? pageUrl : undefined,
+      carouselIndex: total > 1 ? index + 1 : undefined,
+      carouselTotal: total > 1 ? total : undefined,
+    };
+  }
+
+  _buildParseResponse(pageUrl, info) {
+    const entries = this._extractPlaylistEntries(info);
+    const playlistThumb = info.thumbnail || (info.thumbnails && info.thumbnails[0]?.url) || "";
+    const total = entries.length;
+    const media = entries.map((entry, i) =>
+      this._mediaFromEntry(entry, pageUrl, i, total, playlistThumb),
+    );
+    const primary = media[0] || this._mediaFromEntry(info, pageUrl, 0, 1, playlistThumb);
+
+    return {
+      success: true,
+      engine: "yt-dlp",
+      title: this._title(info),
+      thumbnail: primary.thumbnail || playlistThumb,
+      duration: primary.duration || 0,
+      width: primary.width || 0,
+      height: primary.height || 0,
+      aspectRatio: primary.aspectRatio,
+      resolution: primary.resolution,
+      quality: primary.quality,
+      formats: primary.formats,
+      bestFormatId: primary.bestFormatId,
+      media: media.length ? media : [primary],
+    };
+  }
+
   // ─── 下载 ───────────────────────────────────────────
 
   download(url, formatId, filePath, onProgress, opts = {}) {
@@ -144,7 +240,9 @@ class YtDlpEngine {
       const rt = this._jsRuntime();
       const args = ["-o", filePath, "--no-playlist", "--progress", "--newline", "--no-mtime", ...rt.args];
       if (opts.ffmpegPath) args.push("--ffmpeg-location", opts.ffmpegPath);
-      if (opts.extractAudio) {
+      if (opts.mediaType === "image") {
+        args.push("-f", formatId || "best");
+      } else if (opts.extractAudio) {
         // 提取音频为 MP3（-x 自动选最佳音频轨，忽略 formatId）
         args.push("-x", "--audio-format", "mp3");
       } else if (formatId) {
@@ -277,9 +375,7 @@ class YtDlpEngine {
   }
 
   _fileName(info) {
-    const ext = info.ext || "mp4";
-    const title = (this._title(info) || "video").replace(/[<>:"/\\|?*]/g, "_").substring(0, 60);
-    return `${title}.${ext}`;
+    return this._fileNameForEntry(info, 0, 1, "video");
   }
 
   _formatSize(bytes) {

@@ -5,6 +5,7 @@ import { Button } from "./ui/button";
 import { EmptyState } from "./EmptyState";
 import { MediaCard } from "./MediaCard";
 import type { Media } from "../lib/types";
+import { mediaKey } from "../lib/media";
 
 interface MediaListProps {
   parsedList: Media[];
@@ -42,7 +43,7 @@ export function MediaList({
     );
   }
 
-  const allQueued = parsedList.every((m) => queuedKeys.has(m.url || m.fileName));
+  const allQueued = parsedList.every((m) => queuedKeys.has(mediaKey(m)));
 
   return (
     <div className="min-h-0 flex-1">
@@ -70,11 +71,11 @@ export function MediaList({
         <div className="grid grid-cols-1 gap-3 pr-1 xl:grid-cols-2">
           {parsedList.map((m, i) => (
             <MediaCard
-              key={`${m.url || m.fileName}-${i}`}
+              key={`${mediaKey(m)}-${i}`}
               media={m}
               isActive={activeMedia === m}
-              selectedFormat={formatMap[m.url || m.fileName] ?? null}
-              isQueued={queuedKeys.has(m.url || m.fileName)}
+              selectedFormat={formatMap[mediaKey(m)] ?? null}
+              isQueued={queuedKeys.has(mediaKey(m))}
               onSelect={onSelectMedia}
               onFormatChange={onFormatChange}
               onAddToQueue={onAddToQueue}

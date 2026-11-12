@@ -35,6 +35,10 @@ export interface Media {
   // ── 内部标记 ──
   /** 解析时使用的原始 URL（用于历史匹配） */
   _parseUrl?: string;
+  /** Instagram 轮播：帖子 URL */
+  carouselId?: string;
+  carouselIndex?: number;
+  carouselTotal?: number;
 }
 
 /** 解析结果（引擎返回） */

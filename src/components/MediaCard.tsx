@@ -2,6 +2,7 @@ import { CheckCircle2, Download, Music, Play } from "lucide-react";
 import { cn, duration, meta } from "../lib/utils";
 import { Button } from "./ui/button";
 import type { Media } from "../lib/types";
+import { mediaKey as getMediaKey } from "../lib/media";
 
 interface MediaCardProps {
   media: Media;
@@ -25,8 +26,13 @@ export function MediaCard({
   onAddAudioToQueue,
 }: MediaCardProps) {
   const p = meta(media.url || "");
-  const mKey = media.url || media.fileName;
+  const mKey = getMediaKey(media);
   const fmts = media.formats || [];
+  const isImage = media.type === "image";
+  const carouselLabel =
+    media.carouselTotal && media.carouselTotal > 1 && media.carouselIndex
+      ? `${media.carouselIndex}/${media.carouselTotal}`
+      : null;
 
   return (
     <article
@@ -48,7 +54,17 @@ export function MediaCard({
           />
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-black/10" />
-        {duration(media.duration) && (
+        {(carouselLabel || isImage) && (
+          <span
+            className={cn(
+              "absolute left-3 top-3 rounded-md px-2 py-1 text-[11px] font-medium",
+              carouselLabel ? "bg-black/70" : "bg-violet-500/80",
+            )}
+          >
+            {carouselLabel ? `轮播 ${carouselLabel}` : "图片"}
+          </span>
+        )}
+        {!isImage && duration(media.duration) && (
           <span className="absolute bottom-3 right-3 rounded-md bg-black/70 px-2 py-1 text-[11px]">
             {duration(media.duration)}
           </span>
@@ -68,7 +84,7 @@ export function MediaCard({
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5 sm:gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
-            {fmts.slice(0, 3).map((f: any, j: number) => (
+            {(isImage ? fmts.slice(0, 1) : fmts.slice(0, 3)).map((f: any, j: number) => (
               <button
                 key={f.id}
                 onClick={(e) => {
@@ -95,17 +111,19 @@ export function MediaCard({
             </Button>
           ) : (
             <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
-              <Button
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onAddAudioToQueue(media, selectedFormat);
-                }}
-                className="h-8 rounded-[9px] bg-orange-500/18 px-3 text-xs text-orange-300 hover:bg-orange-500/28"
-              >
-                <Music className="h-3.5 w-3.5" />
-                提取音频
-              </Button>
+              {!isImage && (
+                <Button
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAddAudioToQueue(media, selectedFormat);
+                  }}
+                  className="h-8 rounded-[9px] bg-orange-500/18 px-3 text-xs text-orange-300 hover:bg-orange-500/28"
+                >
+                  <Music className="h-3.5 w-3.5" />
+                  提取音频
+                </Button>
+              )}
               <Button
                 size="sm"
                 onClick={(e) => {
